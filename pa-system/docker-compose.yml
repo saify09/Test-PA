@@ -1,0 +1,547 @@
+version: "3.9"
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  AI Prior Authorization System — Complete Stack                          ║
+# ║  Version: 1.0.0  |  Last Updated: 2026-03                               ║
+# ╠══════════════════════════════════════════════════════════════════════════╣
+# ║  FRONTEND PORTALS (Next.js 14)                                           ║
+# ║    3000 — Provider Portal                                                ║
+# ║    3001 — Reviewer Workbench                                             ║
+# ║    3002 — Member Portal                                                  ║
+# ║    3003 — Admin Dashboard                                                ║
+# ╠══════════════════════════════════════════════════════════════════════════╣
+# ║  BACKEND SERVICES (FastAPI / Python 3.11)                                ║
+# ║    8001 — AI Engine (BioBERT, ClinicalBERT, RAG, OCR)                   ║
+# ║    8002 — Intake Service (PA submission, validation, EDI 278)            ║
+# ║    8003 — Payer Integration (UHC, Aetna, BCBS, Cigna)                   ║
+# ║    8004 — Appeals Service (FR-401..407)                                  ║
+# ║    8005 — Notification Service (email, SMS, fax, HL7, FHIR)             ║
+# ║    8006 — Document Service (OCR, S3, DICOM)                             ║
+# ║    8007 — Auth Service (JWT, MFA, SAML/OAuth SSO)                       ║
+# ║    8008 — User Management (RBAC, provider directory)                     ║
+# ║    8009 — Reporting Service (KPIs, analytics, exports)                  ║
+# ║    8010 — Eligibility Service (X12 270/271, formulary)                  ║
+# ║    8011 — Audit Service (HIPAA immutable logs, SIEM)                    ║
+# ╠══════════════════════════════════════════════════════════════════════════╣
+# ║  INFRASTRUCTURE                                                          ║
+# ║    5432 — PostgreSQL 16                                                  ║
+# ║    6379 — Redis 7                                                        ║
+# ║    9092 — Apache Kafka                                                   ║
+# ║    8000 — Kong API Gateway                                               ║
+# ║    9090 — Prometheus                                                     ║
+# ║    3100 — Grafana                                                        ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+x-backend-defaults: &backend-defaults
+  restart: unless-stopped
+  environment: &backend-env
+    DATABASE_URL:      ${DATABASE_URL:-postgresql+asyncpg://pauser:papass@postgres:5432/pa_system}
+    REDIS_URL:         ${REDIS_URL:-redis://:${REDIS_PASSWORD:-redispass}@redis:6379/0}
+    KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+    SECRET_KEY:        ${SECRET_KEY:-CHANGE_ME_IN_PRODUCTION_MIN_32_CHARS_XXXX}
+    ENCRYPTION_KEY:    ${ENCRYPTION_KEY:-CHANGE_ME_AES256_KEY_32BYTES_PROD!!}
+    ENVIRONMENT:       ${ENVIRONMENT:-development}
+    AWS_REGION:        ${AWS_REGION:-us-east-1}
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-PLACEHOLDER_AWS_ACCESS_KEY_ID}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-PLACEHOLDER_AWS_SECRET_ACCESS_KEY}
+    S3_DOCUMENTS_BUCKET: ${S3_DOCUMENTS_BUCKET:-pa-documents-hipaa-dev}
+    # AI Model settings
+    BIOBERT_MODEL_ID:      ${BIOBERT_MODEL_ID:-dmis-lab/biobert-v1.1}
+    CLINICALBERT_MODEL_ID: ${CLINICALBERT_MODEL_ID:-emilyalsentzer/Bio_ClinicalBERT}
+    MODELS_CACHE_DIR:      /models
+    USE_GPU:               ${USE_GPU:-0}
+    # Service URLs (internal Docker networking)
+    AUTH_SERVICE_URL:         http://auth-service:8007
+    USER_MGMT_SERVICE_URL:    http://user-management-service:8008
+    REPORTING_SERVICE_URL:    http://reporting-service:8009
+    ELIGIBILITY_SERVICE_URL:  http://eligibility-service:8010
+    AUDIT_SERVICE_URL:        http://audit-service:8011
+    NOTIFICATION_SERVICE_URL: http://notification-service:8005
+    DOCUMENT_SERVICE_URL:     http://document-service:8006
+    # Payer API keys (set in .env)
+    UHC_CLIENT_ID:        ${UHC_CLIENT_ID:-PLACEHOLDER_UHC_CLIENT_ID}
+    UHC_CLIENT_SECRET:    ${UHC_CLIENT_SECRET:-PLACEHOLDER_UHC_CLIENT_SECRET}
+    AETNA_CLIENT_ID:      ${AETNA_CLIENT_ID:-PLACEHOLDER_AETNA_CLIENT_ID}
+    AETNA_CLIENT_SECRET:  ${AETNA_CLIENT_SECRET:-PLACEHOLDER_AETNA_CLIENT_SECRET}
+    BCBS_API_KEY:         ${BCBS_API_KEY:-PLACEHOLDER_BCBS_API_KEY}
+    CIGNA_CLIENT_ID:      ${CIGNA_CLIENT_ID:-PLACEHOLDER_CIGNA_CLIENT_ID}
+    CIGNA_CLIENT_SECRET:  ${CIGNA_CLIENT_SECRET:-PLACEHOLDER_CIGNA_CLIENT_SECRET}
+    CVS_API_KEY:          ${CVS_API_KEY:-PLACEHOLDER_CVS_API_KEY}
+    # Clinical guidelines
+    MCG_API_KEY:          ${MCG_API_KEY:-PLACEHOLDER_MCG_API_KEY}
+    INTERQUAL_API_KEY:    ${INTERQUAL_API_KEY:-PLACEHOLDER_INTERQUAL_API_KEY}
+    # Notifications
+    SENDGRID_API_KEY:     ${SENDGRID_API_KEY:-PLACEHOLDER_SENDGRID_API_KEY}
+    TWILIO_ACCOUNT_SID:   ${TWILIO_ACCOUNT_SID:-PLACEHOLDER_TWILIO_ACCOUNT_SID}
+    TWILIO_AUTH_TOKEN:    ${TWILIO_AUTH_TOKEN:-PLACEHOLDER_TWILIO_AUTH_TOKEN}
+    TWILIO_FROM_NUMBER:   ${TWILIO_FROM_NUMBER:-+15550000000}
+    # SIEM
+    SIEM_URL: ${SIEM_URL:-}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+  networks:
+    - pa-network
+
+x-frontend-defaults: &frontend-defaults
+  restart: unless-stopped
+  networks:
+    - pa-network
+
+services:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # INFRASTRUCTURE
+  # ═══════════════════════════════════════════════════════════════════════════
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       pa_system
+      POSTGRES_USER:     pauser
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-papass}
+      PGDATA:            /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pauser -d pa_system"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - pa-network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redispass} --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispass}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pa-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME:   2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+    networks:
+      - pa-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    environment:
+      KAFKA_BROKER_ID:                        1
+      KAFKA_ZOOKEEPER_CONNECT:                zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:   PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS:             PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME:       PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE:        "true"
+      KAFKA_LOG_RETENTION_HOURS:              168
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - pa-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # AI ENGINE — Core clinical AI (BioBERT, ClinicalBERT, RAG, OCR)
+  # ═══════════════════════════════════════════════════════════════════════════
+  ai-engine:
+    build:
+      context: ./ai-engine
+      dockerfile: Dockerfile
+    <<: *backend-defaults
+    ports:
+      - "8001:8001"
+    environment:
+      <<: *backend-env
+      PORT: 8001
+      ENABLE_RAG_ENGINE: ${ENABLE_RAG_ENGINE:-true}
+    volumes:
+      - models_cache:/models
+      - ./ai-engine:/app:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 120s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MICROSERVICES
+  # ═══════════════════════════════════════════════════════════════════════════
+  intake-service:
+    build:
+      context: ./microservices/intake-service
+      dockerfile: Dockerfile
+    <<: *backend-defaults
+    ports:
+      - "8002:8002"
+    environment:
+      <<: *backend-env
+      PORT: 8002
+      AI_ENGINE_URL: http://ai-engine:8001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  payer-integration:
+    build:
+      context: ./microservices/payer-integration
+      dockerfile: Dockerfile
+    <<: *backend-defaults
+    ports:
+      - "8003:8003"
+    environment:
+      <<: *backend-env
+      PORT: 8003
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  appeals-service:
+    build:
+      context: ./microservices/appeals-service
+      dockerfile: Dockerfile
+    <<: *backend-defaults
+    ports:
+      - "8004:8004"
+    environment:
+      <<: *backend-env
+      PORT: 8004
+      AI_ENGINE_URL: http://ai-engine:8001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  notification-service:
+    build:
+      context: ./microservices/notification-service
+      dockerfile: Dockerfile
+    <<: *backend-defaults
+    ports:
+      - "8005:8005"
+    environment:
+      <<: *backend-env
+      PORT: 8005
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  document-service:
+    build:
+      context: ./microservices/document-service
+      dockerfile: Dockerfile
+    <<: *backend-defaults
+    ports:
+      - "8006:8006"
+    environment:
+      <<: *backend-env
+      PORT: 8006
+      AI_ENGINE_URL: http://ai-engine:8001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  auth-service:
+    build:
+      context: ./microservices/auth-service
+      dockerfile: Dockerfile
+    <<: *backend-defaults
+    ports:
+      - "8007:8007"
+    environment:
+      <<: *backend-env
+      PORT: 8007
+      ACCESS_TOKEN_TTL_MINUTES: 60
+      REFRESH_TOKEN_TTL_DAYS: 7
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  user-management-service:
+    build:
+      context: ./microservices/user-management-service
+      dockerfile: Dockerfile
+    <<: *backend-defaults
+    ports:
+      - "8008:8008"
+    environment:
+      <<: *backend-env
+      PORT: 8008
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  reporting-service:
+    build:
+      context: ./microservices/reporting-service
+      dockerfile: Dockerfile
+    <<: *backend-defaults
+    ports:
+      - "8009:8009"
+    environment:
+      <<: *backend-env
+      PORT: 8009
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  eligibility-service:
+    build:
+      context: ./microservices/eligibility-service
+      dockerfile: Dockerfile
+    <<: *backend-defaults
+    ports:
+      - "8010:8010"
+    environment:
+      <<: *backend-env
+      PORT: 8010
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  audit-service:
+    build:
+      context: ./microservices/audit-service
+      dockerfile: Dockerfile
+    <<: *backend-defaults
+    ports:
+      - "8011:8011"
+    environment:
+      <<: *backend-env
+      PORT: 8011
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # FRONTEND PORTALS
+  # ═══════════════════════════════════════════════════════════════════════════
+  provider-portal:
+    build:
+      context: ./provider-portal
+      dockerfile: Dockerfile
+    <<: *frontend-defaults
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL:          http://ai-engine:8001
+      NEXT_PUBLIC_AUTH_URL:         http://auth-service:8007
+      NEXT_PUBLIC_INTAKE_URL:       http://intake-service:8002
+      NEXT_PUBLIC_ELIGIBILITY_URL:  http://eligibility-service:8010
+      NEXT_PUBLIC_APP_NAME:         "PA Provider Portal"
+      NODE_ENV: production
+    depends_on:
+      - ai-engine
+      - auth-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  reviewer-workbench:
+    build:
+      context: ./reviewer-workbench
+      dockerfile: Dockerfile
+    <<: *frontend-defaults
+    ports:
+      - "3001:3001"
+    environment:
+      NEXT_PUBLIC_API_URL:  http://ai-engine:8001
+      NEXT_PUBLIC_AUTH_URL: http://auth-service:8007
+      NEXT_PUBLIC_APP_NAME: "PA Reviewer Workbench"
+      NODE_ENV: production
+    depends_on:
+      - ai-engine
+      - auth-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  member-portal:
+    build:
+      context: ./member-portal
+      dockerfile: Dockerfile
+    <<: *frontend-defaults
+    ports:
+      - "3002:3002"
+    environment:
+      NEXT_PUBLIC_API_URL:  http://ai-engine:8001
+      NEXT_PUBLIC_AUTH_URL: http://auth-service:8007
+      NEXT_PUBLIC_APP_NAME: "Member Portal"
+      NODE_ENV: production
+    depends_on:
+      - ai-engine
+      - auth-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  admin-dashboard:
+    build:
+      context: ./admin-dashboard
+      dockerfile: Dockerfile
+    <<: *frontend-defaults
+    ports:
+      - "3003:3003"
+    environment:
+      NEXT_PUBLIC_API_URL:          http://ai-engine:8001
+      NEXT_PUBLIC_AUTH_URL:         http://auth-service:8007
+      NEXT_PUBLIC_REPORTING_URL:    http://reporting-service:8009
+      NEXT_PUBLIC_AUDIT_URL:        http://audit-service:8011
+      NEXT_PUBLIC_USER_MGMT_URL:    http://user-management-service:8008
+      NEXT_PUBLIC_APP_NAME:         "PA Admin Dashboard"
+      NODE_ENV: production
+    depends_on:
+      - ai-engine
+      - auth-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # API GATEWAY
+  # ═══════════════════════════════════════════════════════════════════════════
+  kong:
+    image: kong:3.6-alpine
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE:         "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yaml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG:  /dev/stderr
+      KONG_ADMIN_ERROR_LOG:  /dev/stderr
+      KONG_ADMIN_LISTEN:     "0.0.0.0:8444 ssl"
+      KONG_PROXY_LISTEN:     "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+    volumes:
+      - ./infrastructure/kong/kong.yaml:/etc/kong/kong.yaml:ro
+    ports:
+      - "8080:8000"
+      - "8443:8443"
+    depends_on:
+      - ai-engine
+    networks:
+      - pa-network
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # OBSERVABILITY
+  # ═══════════════════════════════════════════════════════════════════════════
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infrastructure/monitoring/prometheus/alerts.yaml:/etc/prometheus/alerts.yaml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    networks:
+      - pa-network
+
+  grafana:
+    image: grafana/grafana:10.3.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin123}
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+      GF_INSTALL_PLUGINS:         "grafana-clock-panel,grafana-simple-json-datasource"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/monitoring/grafana/pa-system-dashboard.json:/var/lib/grafana/dashboards/pa-system.json:ro
+    ports:
+      - "3100:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - pa-network
+
+# ═══════════════════════════════════════════════════════════════════════════
+# VOLUMES
+# ═══════════════════════════════════════════════════════════════════════════
+volumes:
+  postgres_data:    { driver: local }
+  redis_data:       { driver: local }
+  kafka_data:       { driver: local }
+  zookeeper_data:   { driver: local }
+  models_cache:     { driver: local }
+  prometheus_data:  { driver: local }
+  grafana_data:     { driver: local }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NETWORKS
+# ═══════════════════════════════════════════════════════════════════════════
+networks:
+  pa-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

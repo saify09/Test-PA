@@ -1,0 +1,252 @@
+# Kong API Gateway — Declarative Configuration (deck format)
+# Implements: API routing, JWT auth, rate limiting, WAF, CORS, logging
+# Deploy: deck sync --state kong.yaml
+
+_format_version: "3.0"
+_transform: true
+
+# ── Services (upstream backends) ──────────────────────────────────────────────
+services:
+
+- name: ai-engine
+  url: http://ai-engine.pa-system.svc.cluster.local:8001
+  connect_timeout: 5000
+  write_timeout: 30000
+  read_timeout: 30000     # AI inference can take up to 5s; allow buffer
+  retries: 2
+  routes:
+  - name: ai-analyze
+    paths: ["/api/v1/ai"]
+    methods: [GET, POST, PUT, DELETE, OPTIONS]
+    strip_path: false
+    preserve_host: false
+  - name: ai-health
+    paths: ["/health"]
+    methods: [GET]
+    strip_path: false
+
+- name: intake-service
+  url: http://intake-service.pa-system.svc.cluster.local:8002
+  connect_timeout: 5000
+  write_timeout: 15000
+  read_timeout: 15000
+  retries: 2
+  routes:
+  - name: intake-routes
+    paths: ["/api/v1/intake"]
+    methods: [GET, POST, PUT, OPTIONS]
+    strip_path: true
+
+- name: payer-integration
+  url: http://payer-integration.pa-system.svc.cluster.local:8003
+  connect_timeout: 5000
+  write_timeout: 20000
+  read_timeout: 20000     # Payer APIs can be slow
+  retries: 1
+  routes:
+  - name: payer-routes
+    paths: ["/api/v1/payer"]
+    methods: [GET, POST, OPTIONS]
+    strip_path: true
+
+- name: appeals-service
+  url: http://appeals-service.pa-system.svc.cluster.local:8004
+  connect_timeout: 5000
+  write_timeout: 15000
+  read_timeout: 15000
+  retries: 2
+  routes:
+  - name: appeals-routes
+    paths: ["/api/v1/appeals"]
+    methods: [GET, POST, PUT, DELETE, OPTIONS]
+    strip_path: true
+  - name: tracking-public
+    paths: ["/api/v1/track"]
+    methods: [GET, OPTIONS]
+    strip_path: true
+
+- name: notification-service
+  url: http://notification-service.pa-system.svc.cluster.local:8005
+  connect_timeout: 5000
+  write_timeout: 10000
+  read_timeout: 10000
+  routes:
+  - name: notification-routes
+    paths: ["/api/v1/notify"]
+    methods: [GET, POST, OPTIONS]
+    strip_path: true
+
+- name: document-service
+  url: http://document-service.pa-system.svc.cluster.local:8006
+  connect_timeout: 5000
+  write_timeout: 120000   # Large file uploads
+  read_timeout: 120000
+  routes:
+  - name: document-routes
+    paths: ["/api/v1/documents"]
+    methods: [GET, POST, PUT, DELETE, OPTIONS]
+    strip_path: true
+
+# ── Global Plugins ─────────────────────────────────────────────────────────────
+plugins:
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+- name: cors
+  config:
+    origins:
+    - "https://portal.pa-system.health"
+    - "https://reviewer.pa-system.health"
+    - "https://member.pa-system.health"
+    - "https://admin.pa-system.health"
+    - "http://localhost:3000"
+    - "http://localhost:3001"
+    - "http://localhost:3002"
+    - "http://localhost:3003"
+    methods: [GET, POST, PUT, DELETE, OPTIONS, PATCH]
+    headers:
+    - Authorization
+    - Content-Type
+    - X-Correlation-ID
+    - X-Request-ID
+    exposed_headers:
+    - X-Response-Time-Ms
+    - X-Correlation-ID
+    - X-RateLimit-Remaining-Minute
+    credentials: true
+    max_age: 3600
+
+# ── Global rate limiting ───────────────────────────────────────────────────────
+- name: rate-limiting
+  config:
+    minute: 300
+    hour: 5000
+    policy: redis
+    redis_host: redis-master.pa-system.svc.cluster.local
+    redis_port: 6379
+    redis_database: 6
+    limit_by: consumer
+    fault_tolerant: true
+    hide_client_headers: false
+    error_code: 429
+    error_message: "API rate limit exceeded. Please retry after 60 seconds."
+
+# ── Request size limit ─────────────────────────────────────────────────────────
+- name: request-size-limiting
+  config:
+    allowed_payload_size: 52   # 52 MB (document uploads)
+    size_unit: megabytes
+    require_content_length: false
+
+# ── Correlation ID injection ───────────────────────────────────────────────────
+- name: correlation-id
+  config:
+    header_name: X-Correlation-ID
+    generator: uuid
+    echo_downstream: true
+
+# ── HTTP logging to stdout (structured JSON for ELK/CloudWatch) ────────────────
+- name: file-log
+  config:
+    path: /dev/stdout
+    reopen: false
+    custom_fields_by_lua:
+      service_name: "return kong.router.get_service() and kong.router.get_service().name or 'unknown'"
+      env: "return 'production'"
+
+# ── Prometheus metrics ─────────────────────────────────────────────────────────
+- name: prometheus
+  config:
+    status_code_metrics: true
+    latency_metrics: true
+    bandwidth_metrics: true
+    upstream_health_metrics: true
+
+# ── Response transformer — add security headers ────────────────────────────────
+- name: response-transformer
+  config:
+    add:
+      headers:
+      - "Strict-Transport-Security:max-age=31536000; includeSubDomains; preload"
+      - "X-Content-Type-Options:nosniff"
+      - "X-Frame-Options:DENY"
+      - "X-XSS-Protection:1; mode=block"
+      - "Referrer-Policy:strict-origin-when-cross-origin"
+      - "Cache-Control:no-store, no-cache, must-revalidate"
+
+# ── Per-route plugins ─────────────────────────────────────────────────────────
+
+# AI engine — tighter rate limit (inference is expensive)
+- name: rate-limiting
+  route: ai-analyze
+  config:
+    minute: 60
+    hour: 500
+    policy: redis
+    redis_host: redis-master.pa-system.svc.cluster.local
+    redis_port: 6379
+    redis_database: 6
+    limit_by: consumer
+
+# Public tracking — no auth required, looser rate limit
+- name: rate-limiting
+  route: tracking-public
+  config:
+    minute: 30
+    hour: 200
+    policy: local
+    limit_by: ip
+
+# Document uploads — very tight (prevent abuse)
+- name: rate-limiting
+  route: document-routes
+  config:
+    minute: 20
+    hour: 100
+    policy: redis
+    redis_host: redis-master.pa-system.svc.cluster.local
+    redis_port: 6379
+    redis_database: 6
+    limit_by: consumer
+
+# ── Consumers (service accounts for inter-service auth) ───────────────────────
+consumers:
+
+- username: provider-portal
+  keyauth_credentials:
+  - key: "REPLACE_WITH_GENERATED_KEY"
+  plugins:
+  - name: rate-limiting
+    config:
+      minute: 200
+      hour: 3000
+
+- username: reviewer-workbench
+  keyauth_credentials:
+  - key: "REPLACE_WITH_GENERATED_KEY"
+  plugins:
+  - name: rate-limiting
+    config:
+      minute: 300
+      hour: 5000
+
+- username: member-portal
+  keyauth_credentials:
+  - key: "REPLACE_WITH_GENERATED_KEY"
+  plugins:
+  - name: rate-limiting
+    config:
+      minute: 60
+      hour: 500
+
+- username: admin-dashboard
+  keyauth_credentials:
+  - key: "REPLACE_WITH_GENERATED_KEY"
+
+- username: internal-services
+  keyauth_credentials:
+  - key: "REPLACE_WITH_GENERATED_KEY"
+  plugins:
+  - name: rate-limiting
+    config:
+      minute: 1000
+      hour: 20000

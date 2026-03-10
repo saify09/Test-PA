@@ -1,0 +1,65 @@
+{{/* PA System Helm Templates — deploys all services from values */}}
+
+{{- range $name, $cfg := .Values }}
+{{- if and (kindIs "map" $cfg) (hasKey $cfg "replicas") }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: pa-system
+  labels:
+    app: {{ $name }}
+    chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
+    environment: {{ $.Values.global.environment }}
+spec:
+  replicas: {{ $cfg.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+        version: {{ $.Values.global.imageTag }}
+    spec:
+      serviceAccountName: pa-backend-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+      - name: {{ $name }}
+        image: "{{ $.Values.global.imageRegistry }}/{{ $name }}:{{ $.Values.global.imageTag }}"
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: pa-common-config
+        - secretRef:
+            name: pa-secrets
+        resources:
+          {{- toYaml $cfg.resources | nindent 10 }}
+        {{- if hasKey $cfg "canary" }}
+        {{- if $cfg.canary.enabled }}
+        # Canary deployment label
+        {{- end }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: pa-system
+spec:
+  selector:
+    app: {{ $name }}
+  ports:
+  - port: 80
+    targetPort: 8080
+    name: http
+{{- end }}
+{{- end }}

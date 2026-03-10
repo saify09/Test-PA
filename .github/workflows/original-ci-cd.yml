@@ -30,17 +30,17 @@ jobs:
       
       - name: Lint with flake8
         run: |
-          flake8 backend --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 backend --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          flake8 microservices --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 microservices --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
       
       - name: Check formatting with black
-        run: black --check backend
+        run: black --check microservices
       
       - name: Type checking with mypy
-        run: mypy backend --ignore-missing-imports
+        run: mypy microservices --ignore-missing-imports
       
       - name: Security scan with bandit
-        run: bandit -r backend -ll
+        run: bandit -r microservices -ll
       
       - name: Check dependencies for vulnerabilities
         run: safety check --file requirements.txt || true
@@ -62,18 +62,18 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install -r backend/services/${{ matrix.service }}/requirements.txt
+          pip install -r microservices/${{ matrix.service }}/requirements.txt
           pip install pytest pytest-cov pytest-mock
       
       - name: Run unit tests
         run: |
-          cd backend/services/${{ matrix.service }}
+          cd microservices/${{ matrix.service }}
           pytest tests/unit --cov=. --cov-report=xml --cov-report=term
       
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
-          files: ./backend/services/${{ matrix.service }}/coverage.xml
+          files: ./microservices/${{ matrix.service }}/coverage.xml
           flags: ${{ matrix.service }}
 
   # ==================== INTEGRATION TESTS ====================
@@ -173,9 +173,9 @@ jobs:
         id: context
         run: |
           if [[ "${{ matrix.service }}" == *"-service" ]]; then
-            echo "path=backend/services/${{ matrix.service }}" >> $GITHUB_OUTPUT
+            echo "path=microservices/${{ matrix.service }}" >> $GITHUB_OUTPUT
           else
-            echo "path=frontend/${{ matrix.service }}" >> $GITHUB_OUTPUT
+            echo "path=${{ matrix.service }}" >> $GITHUB_OUTPUT
           fi
       
       - name: Build and push

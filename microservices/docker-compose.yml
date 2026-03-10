@@ -1,0 +1,250 @@
+version: "3.9"
+
+# PA System — All Microservices
+# Ports:
+#   3000 — Provider Portal (Next.js)
+#   3001 — Reviewer Workbench (Next.js)
+#   3002 — Member Portal (Next.js)
+#   3003 — Admin Dashboard (Next.js)
+#   8001 — AI Engine (FastAPI)
+#   8002 — Intake Service (FastAPI)
+#   8003 — Payer Integration (FastAPI)
+#   8004 — Appeals Service (FastAPI)
+#   8005 — Notification Service (FastAPI)
+#   8006 — Document Service (FastAPI)
+#   5432 — PostgreSQL
+#   6379 — Redis
+#   9092 — Kafka
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  environment:
+    DATABASE_URL: postgresql+asyncpg://pauser:papass@postgres:5432/pa_system
+    REDIS_URL: redis://redis:6379/0
+    KAFKA_SERVERS: kafka:9092
+    SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production-min-32-chars}
+    ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev-enc-key-32bytes-change-prod!!}
+    ENVIRONMENT: ${ENVIRONMENT:-development}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pa_system
+      POSTGRES_USER: pauser
+      POSTGRES_PASSWORD: papass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pauser -d pa_system"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redispass}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: pa-system
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
+
+  # ── Backend Services ────────────────────────────────────────────────────────
+  ai-engine:
+    <<: *service-defaults
+    build: ../ai-engine
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pauser:papass@postgres:5432/pa_system
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production-min-32-chars}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev-enc-key-32bytes-change-prod!!}
+
+  intake-service:
+    <<: *service-defaults
+    build: ../intake-service
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pauser:papass@postgres:5432/pa_system
+      REDIS_URL: redis://redis:6379/1
+      KAFKA_SERVERS: kafka:9092
+      AI_ENGINE_URL: http://ai-engine:8001
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production-min-32-chars}
+
+  payer-integration:
+    <<: *service-defaults
+    build: ../payer-integration
+    ports:
+      - "8003:8003"
+    environment:
+      REDIS_URL: redis://redis:6379/2
+      KAFKA_SERVERS: kafka:9092
+      UHC_CLIENT_ID: ${UHC_CLIENT_ID:-}
+      UHC_CLIENT_SECRET: ${UHC_CLIENT_SECRET:-}
+      AETNA_CLIENT_ID: ${AETNA_CLIENT_ID:-}
+      AETNA_CLIENT_SECRET: ${AETNA_CLIENT_SECRET:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  appeals-service:
+    <<: *service-defaults
+    build: ../appeals-service
+    ports:
+      - "8004:8004"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pauser:papass@postgres:5432/pa_system
+      REDIS_URL: redis://redis:6379/3
+      KAFKA_SERVERS: kafka:9092
+      NOTIFICATION_SERVICE_URL: http://notification-service:8005
+
+  notification-service:
+    <<: *service-defaults
+    build: ../notification-service
+    ports:
+      - "8005:8005"
+    environment:
+      REDIS_URL: redis://redis:6379/4
+      KAFKA_SERVERS: kafka:9092
+      SMTP_HOST: ${SMTP_HOST:-smtp.sendgrid.net}
+      SMTP_PASSWORD: ${SENDGRID_API_KEY:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  document-service:
+    <<: *service-defaults
+    build: ../document-service
+    ports:
+      - "8006:8006"
+    environment:
+      REDIS_URL: redis://redis:6379/5
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-pa-documents-hipaa}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AI_ENGINE_URL: http://ai-engine:8001
+    volumes:
+      - document_storage:/tmp/pa_documents
+
+  # ── Frontend Apps ───────────────────────────────────────────────────────────
+  provider-portal:
+    build: ../provider-portal
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8002
+      NEXT_PUBLIC_AI_ENGINE_URL: http://localhost:8001
+
+  reviewer-workbench:
+    build: ../reviewer-workbench
+    ports:
+      - "3001:3001"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8001
+
+  member-portal:
+    build: ../member-portal
+    ports:
+      - "3002:3002"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8002
+      NEXT_PUBLIC_APPEALS_URL: http://localhost:8004
+
+  admin-dashboard:
+    build: ../admin-dashboard
+    ports:
+      - "3003:3003"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8001
+      NEXT_PUBLIC_ADMIN_API_URL: http://localhost:8001
+
+  # ── MinIO (local S3 for dev/CI) ──────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-minioadmin123}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+  minio_data:
+  document_storage:

@@ -1,0 +1,75 @@
+global:
+  imageTag: latest
+  environment: staging
+  imageRegistry: ""
+
+ai-engine:
+  replicas: 1
+  canary: { enabled: false, weight: 0 }
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits:   { cpu: "1000m", memory: "2Gi" }
+
+intake-service:
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+
+payer-integration:
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+
+appeals-service:
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+
+notification-service:
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "250m", memory: "256Mi" }
+
+document-service:
+  replicas: 1
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits:   { cpu: "1000m", memory: "2Gi" }
+
+provider-portal:
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "250m", memory: "256Mi" }
+
+reviewer-workbench:
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "250m", memory: "256Mi" }
+
+member-portal:
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "250m", memory: "256Mi" }
+
+admin-dashboard:
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "250m", memory: "256Mi" }
+
+ingress:
+  enabled: true
+  className: alb
+  hosts:
+    provider:  portal.staging.pa-system.health
+    reviewer:  reviewer.staging.pa-system.health
+    member:    member.staging.pa-system.health
+    admin:     admin.staging.pa-system.health
+    api:       api.staging.pa-system.health

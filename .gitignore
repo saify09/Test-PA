@@ -1,0 +1,178 @@
+# ============================================================================
+# .gitignore — PA Prior Authorization System Monorepo
+# ============================================================================
+
+# ── CRITICAL: Never commit these ─────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+terraform.tfvars
+*.tfvars
+!terraform.tfvars.example
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+*.secret
+
+# ── Node.js / Next.js ─────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+.turbo/
+.vercel/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg-link
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.coveragerc
+.hypothesis/
+.tox/
+
+# ── Virtual Environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ── uv ────────────────────────────────────────────────────────────────────────
+.uv/
+uv.lock
+
+# ── Terraform ─────────────────────────────────────────────────────────────────
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+*.tfplan
+.terraformignore
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+docker-compose.override.yml
+.docker/
+
+# ── IDE / Editors ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.editorconfig.local
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+*.log.*
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+test-results/
+playwright-report/
+coverage/
+lcov.info
+.jest-cache/
+
+# ── ML/AI Model artifacts (large binary files — use DVC or S3) ───────────────
+*.pkl
+*.pickle
+*.joblib
+*.h5
+*.hdf5
+*.pb
+*.onnx
+*.safetensors
+*.bin
+*.pt
+*.pth
+models/
+checkpoints/
+mlruns/
+mlflow/
+
+# ── Generated/build artifacts ────────────────────────────────────────────────
+*.min.js
+*.min.css
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+storybook-static/
+
+# ── Kubernetes secrets (never commit) ────────────────────────────────────────
+k8s/secrets/
+k8s/*/secret*.yaml
+k8s/*/secrets*.yaml
+
+# ── Local development ─────────────────────────────────────────────────────────
+*.local.yml
+*.local.yaml
+docker-compose.local.yml
+local/
+
+# ── Database ──────────────────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+dump.sql
+dump.*.sql
+
+# ── Uploads / PHI (never commit patient data) ────────────────────────────────
+uploads/
+test-data/phi/
+fixtures/phi/
+sample-documents/real/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+Project data/

@@ -12,6 +12,7 @@ In production: loads trained BiomedBERT model + guidelines database.
 This module ships a comprehensive rule-based fallback that mirrors the
 real ML pipeline so all endpoints work without GPU infrastructure.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,8 +25,14 @@ import structlog
 
 from app.core.config import settings
 from app.schemas.pa_schemas import (
-    AIRecommendation, CriteriaEvaluation, CriterionResult, CriteriaStatus,
-    PASubmissionRequest, RouteDecision, ServiceType, UrgencyLevel,
+    AIRecommendation,
+    CriteriaEvaluation,
+    CriterionResult,
+    CriteriaStatus,
+    PASubmissionRequest,
+    RouteDecision,
+    ServiceType,
+    UrgencyLevel,
 )
 
 log = structlog.get_logger(__name__)
@@ -34,99 +41,283 @@ log = structlog.get_logger(__name__)
 # Each entry: criterion_id, name, source, required, weight, met_if
 GUIDELINES: Dict[str, List[Dict]] = {
     "DIAGNOSTIC_IMAGING": [
-        {"id": "IMG-001", "name": "Failed conservative therapy ≥4 weeks",
-         "source": "MCG", "required": True, "weight": 1.5,
-         "keywords": ["conservative", "physical therapy", "NSAIDs", "failed", "weeks"]},
-        {"id": "IMG-002", "name": "Clinical indication documented",
-         "source": "MCG", "required": True, "weight": 2.0,
-         "keywords": ["pain", "injury", "neurological", "deficit", "symptom"]},
-        {"id": "IMG-003", "name": "Previous imaging reviewed (if any)",
-         "source": "InterQual", "required": False, "weight": 0.8,
-         "keywords": ["prior", "previous", "x-ray", "imaging", "reviewed"]},
-        {"id": "IMG-004", "name": "Diagnosis supports imaging modality",
-         "source": "MCG", "required": True, "weight": 1.8,
-         "keywords": ["MRI", "CT", "ultrasound", "appropriate", "indicated"]},
-        {"id": "IMG-005", "name": "Ordering provider documented clinical exam",
-         "source": "InterQual", "required": False, "weight": 1.0,
-         "keywords": ["exam", "examination", "physical", "clinical", "assessment"]},
+        {
+            "id": "IMG-001",
+            "name": "Failed conservative therapy ≥4 weeks",
+            "source": "MCG",
+            "required": True,
+            "weight": 1.5,
+            "keywords": [
+                "conservative",
+                "physical therapy",
+                "NSAIDs",
+                "failed",
+                "weeks",
+            ],
+        },
+        {
+            "id": "IMG-002",
+            "name": "Clinical indication documented",
+            "source": "MCG",
+            "required": True,
+            "weight": 2.0,
+            "keywords": ["pain", "injury", "neurological", "deficit", "symptom"],
+        },
+        {
+            "id": "IMG-003",
+            "name": "Previous imaging reviewed (if any)",
+            "source": "InterQual",
+            "required": False,
+            "weight": 0.8,
+            "keywords": ["prior", "previous", "x-ray", "imaging", "reviewed"],
+        },
+        {
+            "id": "IMG-004",
+            "name": "Diagnosis supports imaging modality",
+            "source": "MCG",
+            "required": True,
+            "weight": 1.8,
+            "keywords": ["MRI", "CT", "ultrasound", "appropriate", "indicated"],
+        },
+        {
+            "id": "IMG-005",
+            "name": "Ordering provider documented clinical exam",
+            "source": "InterQual",
+            "required": False,
+            "weight": 1.0,
+            "keywords": ["exam", "examination", "physical", "clinical", "assessment"],
+        },
     ],
     "SURGICAL_PROCEDURE": [
-        {"id": "SURG-001", "name": "Non-surgical alternatives exhausted",
-         "source": "MCG", "required": True, "weight": 2.0,
-         "keywords": ["conservative", "failed", "alternative", "non-surgical", "medical management"]},
-        {"id": "SURG-002", "name": "Imaging confirming surgical indication",
-         "source": "MCG", "required": True, "weight": 2.0,
-         "keywords": ["MRI", "CT", "imaging", "confirmed", "shows", "demonstrates"]},
-        {"id": "SURG-003", "name": "Functional impairment documented",
-         "source": "InterQual", "required": True, "weight": 1.5,
-         "keywords": ["functional", "impairment", "disability", "limitation", "activities"]},
-        {"id": "SURG-004", "name": "Appropriate surgical candidate (medical clearance)",
-         "source": "InterQual", "required": True, "weight": 1.5,
-         "keywords": ["clearance", "candidate", "medical", "surgical", "appropriate"]},
-        {"id": "SURG-005", "name": "In-network facility and surgeon",
-         "source": "PLAN", "required": False, "weight": 1.0,
-         "keywords": ["network", "in-network", "facility", "contracted"]},
+        {
+            "id": "SURG-001",
+            "name": "Non-surgical alternatives exhausted",
+            "source": "MCG",
+            "required": True,
+            "weight": 2.0,
+            "keywords": [
+                "conservative",
+                "failed",
+                "alternative",
+                "non-surgical",
+                "medical management",
+            ],
+        },
+        {
+            "id": "SURG-002",
+            "name": "Imaging confirming surgical indication",
+            "source": "MCG",
+            "required": True,
+            "weight": 2.0,
+            "keywords": ["MRI", "CT", "imaging", "confirmed", "shows", "demonstrates"],
+        },
+        {
+            "id": "SURG-003",
+            "name": "Functional impairment documented",
+            "source": "InterQual",
+            "required": True,
+            "weight": 1.5,
+            "keywords": [
+                "functional",
+                "impairment",
+                "disability",
+                "limitation",
+                "activities",
+            ],
+        },
+        {
+            "id": "SURG-004",
+            "name": "Appropriate surgical candidate (medical clearance)",
+            "source": "InterQual",
+            "required": True,
+            "weight": 1.5,
+            "keywords": [
+                "clearance",
+                "candidate",
+                "medical",
+                "surgical",
+                "appropriate",
+            ],
+        },
+        {
+            "id": "SURG-005",
+            "name": "In-network facility and surgeon",
+            "source": "PLAN",
+            "required": False,
+            "weight": 1.0,
+            "keywords": ["network", "in-network", "facility", "contracted"],
+        },
     ],
     "SPECIALTY_MEDICATION": [
-        {"id": "MED-001", "name": "Step therapy — formulary preferred agents tried",
-         "source": "MCG", "required": True, "weight": 2.0,
-         "keywords": ["step", "therapy", "formulary", "preferred", "tried", "failed", "generic"]},
-        {"id": "MED-002", "name": "Diagnosis matches FDA-approved indication",
-         "source": "FDA", "required": True, "weight": 2.0,
-         "keywords": ["diagnosis", "indication", "approved", "FDA", "label"]},
-        {"id": "MED-003", "name": "Prescribing provider specialty appropriate",
-         "source": "PLAN", "required": False, "weight": 0.8,
-         "keywords": ["specialist", "rheumatologist", "oncologist", "prescriber", "specialty"]},
-        {"id": "MED-004", "name": "Baseline labs / monitoring documented",
-         "source": "MCG", "required": False, "weight": 1.0,
-         "keywords": ["labs", "baseline", "monitoring", "CBC", "LFT", "renal"]},
-        {"id": "MED-005", "name": "Contraindications reviewed",
-         "source": "InterQual", "required": True, "weight": 1.2,
-         "keywords": ["contraindication", "allergy", "adverse", "interaction", "reviewed"]},
+        {
+            "id": "MED-001",
+            "name": "Step therapy — formulary preferred agents tried",
+            "source": "MCG",
+            "required": True,
+            "weight": 2.0,
+            "keywords": [
+                "step",
+                "therapy",
+                "formulary",
+                "preferred",
+                "tried",
+                "failed",
+                "generic",
+            ],
+        },
+        {
+            "id": "MED-002",
+            "name": "Diagnosis matches FDA-approved indication",
+            "source": "FDA",
+            "required": True,
+            "weight": 2.0,
+            "keywords": ["diagnosis", "indication", "approved", "FDA", "label"],
+        },
+        {
+            "id": "MED-003",
+            "name": "Prescribing provider specialty appropriate",
+            "source": "PLAN",
+            "required": False,
+            "weight": 0.8,
+            "keywords": [
+                "specialist",
+                "rheumatologist",
+                "oncologist",
+                "prescriber",
+                "specialty",
+            ],
+        },
+        {
+            "id": "MED-004",
+            "name": "Baseline labs / monitoring documented",
+            "source": "MCG",
+            "required": False,
+            "weight": 1.0,
+            "keywords": ["labs", "baseline", "monitoring", "CBC", "LFT", "renal"],
+        },
+        {
+            "id": "MED-005",
+            "name": "Contraindications reviewed",
+            "source": "InterQual",
+            "required": True,
+            "weight": 1.2,
+            "keywords": [
+                "contraindication",
+                "allergy",
+                "adverse",
+                "interaction",
+                "reviewed",
+            ],
+        },
     ],
     "PHYSICAL_THERAPY": [
-        {"id": "PT-001", "name": "Acute or post-surgical condition documented",
-         "source": "MCG", "required": True, "weight": 1.5,
-         "keywords": ["acute", "post-surgical", "post-operative", "injury", "condition"]},
-        {"id": "PT-002", "name": "Functional goals documented",
-         "source": "MCG", "required": True, "weight": 1.5,
-         "keywords": ["functional", "goals", "objective", "measurable", "improvement"]},
-        {"id": "PT-003", "name": "Number of sessions clinically supported",
-         "source": "InterQual", "required": False, "weight": 1.0,
-         "keywords": ["sessions", "visits", "frequency", "duration", "plan"]},
+        {
+            "id": "PT-001",
+            "name": "Acute or post-surgical condition documented",
+            "source": "MCG",
+            "required": True,
+            "weight": 1.5,
+            "keywords": [
+                "acute",
+                "post-surgical",
+                "post-operative",
+                "injury",
+                "condition",
+            ],
+        },
+        {
+            "id": "PT-002",
+            "name": "Functional goals documented",
+            "source": "MCG",
+            "required": True,
+            "weight": 1.5,
+            "keywords": [
+                "functional",
+                "goals",
+                "objective",
+                "measurable",
+                "improvement",
+            ],
+        },
+        {
+            "id": "PT-003",
+            "name": "Number of sessions clinically supported",
+            "source": "InterQual",
+            "required": False,
+            "weight": 1.0,
+            "keywords": ["sessions", "visits", "frequency", "duration", "plan"],
+        },
     ],
     "DEFAULT": [
-        {"id": "GEN-001", "name": "Medical necessity documented",
-         "source": "MCG", "required": True, "weight": 2.0,
-         "keywords": ["necessary", "required", "indicated", "medical", "clinical"]},
-        {"id": "GEN-002", "name": "Clinical notes support request",
-         "source": "MCG", "required": True, "weight": 1.5,
-         "keywords": ["clinical", "notes", "documentation", "records", "history"]},
-        {"id": "GEN-003", "name": "Diagnosis-procedure alignment",
-         "source": "InterQual", "required": True, "weight": 1.8,
-         "keywords": ["diagnosis", "appropriate", "indicated", "consistent", "supports"]},
+        {
+            "id": "GEN-001",
+            "name": "Medical necessity documented",
+            "source": "MCG",
+            "required": True,
+            "weight": 2.0,
+            "keywords": ["necessary", "required", "indicated", "medical", "clinical"],
+        },
+        {
+            "id": "GEN-002",
+            "name": "Clinical notes support request",
+            "source": "MCG",
+            "required": True,
+            "weight": 1.5,
+            "keywords": ["clinical", "notes", "documentation", "records", "history"],
+        },
+        {
+            "id": "GEN-003",
+            "name": "Diagnosis-procedure alignment",
+            "source": "InterQual",
+            "required": True,
+            "weight": 1.8,
+            "keywords": [
+                "diagnosis",
+                "appropriate",
+                "indicated",
+                "consistent",
+                "supports",
+            ],
+        },
     ],
 }
 
 # ICD-10 high-approval codes (strong medical necessity evidence base)
 HIGH_APPROVAL_DX = {
-    "M511", "M512", "M513",  # Lumbar disc herniation
-    "M4716", "M4715",        # Spondylosis with radiculopathy
-    "G8929", "G8921",        # Pain disorders
-    "C50", "C34", "C18",     # Oncology — very high approval
-    "I250", "I251", "I259",  # CAD
-    "N185", "N186",          # CKD stage 5-6
-    "E1165", "E1166",        # Diabetic complications
-    "J449", "J448",          # COPD
-    "F329", "F334",          # Major depression, recurrent
+    "M511",
+    "M512",
+    "M513",  # Lumbar disc herniation
+    "M4716",
+    "M4715",  # Spondylosis with radiculopathy
+    "G8929",
+    "G8921",  # Pain disorders
+    "C50",
+    "C34",
+    "C18",  # Oncology — very high approval
+    "I250",
+    "I251",
+    "I259",  # CAD
+    "N185",
+    "N186",  # CKD stage 5-6
+    "E1165",
+    "E1166",  # Diabetic complications
+    "J449",
+    "J448",  # COPD
+    "F329",
+    "F334",  # Major depression, recurrent
 }
 
 # Step therapy required medication codes
 STEP_THERAPY_REQUIRED_CPT = {
-    "J0135", "J0171", "J0179",  # Adalimumab / biologics
-    "J0223", "J0224",            # Dupilumab
-    "J9039", "J9041",            # Bevacizumab / oncology
-    "96413", "96415",            # Chemotherapy infusion
+    "J0135",
+    "J0171",
+    "J0179",  # Adalimumab / biologics
+    "J0223",
+    "J0224",  # Dupilumab
+    "J9039",
+    "J9041",  # Bevacizumab / oncology
+    "96413",
+    "96415",  # Chemotherapy infusion
 }
 
 
@@ -137,7 +328,7 @@ class CriteriaEngine:
     Fallback: deterministic rule-based engine using keyword + code matching.
     """
 
-    _ml_model = None   # Loaded on warmup if transformers available
+    _ml_model = None  # Loaded on warmup if transformers available
     _version = settings.MCG_VERSION
 
     @classmethod
@@ -145,12 +336,15 @@ class CriteriaEngine:
         """Pre-load ML models to avoid cold-start latency."""
         try:
             from transformers import pipeline
+
             cls._ml_model = pipeline(
                 "text-classification",
                 model=settings.TRANSFORMER_MODEL,
                 device=-1,  # CPU; set to 0 for GPU
             )
-            log.info("criteria_engine.ml_model_loaded", model=settings.TRANSFORMER_MODEL)
+            log.info(
+                "criteria_engine.ml_model_loaded", model=settings.TRANSFORMER_MODEL
+            )
         except Exception as e:
             log.warning("criteria_engine.ml_unavailable_using_rules", error=str(e))
 
@@ -168,16 +362,24 @@ class CriteriaEngine:
 
         # 2. Evaluate each criterion against clinical text
         clinical_text = cls._build_clinical_text(submission)
-        criteria_results = cls._evaluate_criteria(criteria_defs, clinical_text, submission)
+        criteria_results = cls._evaluate_criteria(
+            criteria_defs, clinical_text, submission
+        )
 
         # 3. Check code-level signals
         code_signals = cls._check_code_signals(submission)
 
         # 4. Build criteria evaluation summary
-        met       = sum(1 for c in criteria_results if c.status == CriteriaStatus.MET)
-        not_met   = sum(1 for c in criteria_results if c.status == CriteriaStatus.NOT_MET)
-        missing   = sum(1 for c in criteria_results if c.status == CriteriaStatus.MISSING_INFO)
-        req_unmet = sum(1 for c in criteria_results if c.required and c.status == CriteriaStatus.NOT_MET)
+        met = sum(1 for c in criteria_results if c.status == CriteriaStatus.MET)
+        not_met = sum(1 for c in criteria_results if c.status == CriteriaStatus.NOT_MET)
+        missing = sum(
+            1 for c in criteria_results if c.status == CriteriaStatus.MISSING_INFO
+        )
+        req_unmet = sum(
+            1
+            for c in criteria_results
+            if c.required and c.status == CriteriaStatus.NOT_MET
+        )
 
         # 5. Compute confidence score
         confidence, reasoning_parts = cls._compute_confidence(
@@ -185,14 +387,18 @@ class CriteriaEngine:
         )
 
         # 6. Determine recommendation and routing
-        recommendation, route = cls._make_routing_decision(confidence, req_unmet, missing, submission)
+        recommendation, route = cls._make_routing_decision(
+            confidence, req_unmet, missing, submission
+        )
 
         # 7. Collect supporting evidence excerpts
         evidence = cls._extract_evidence(criteria_results, clinical_text)
 
         # 8. Missing info list
         missing_info = [
-            c.criterion_name for c in criteria_results if c.status == CriteriaStatus.MISSING_INFO
+            c.criterion_name
+            for c in criteria_results
+            if c.status == CriteriaStatus.MISSING_INFO
         ]
         missing_info += cls._compute_missing_info(submission)
 
@@ -214,9 +420,13 @@ class CriteriaEngine:
             not_met_count=not_met,
             missing_info_count=missing,
             overall_status=(
-                CriteriaStatus.MET if req_unmet == 0 and missing == 0
-                else CriteriaStatus.MISSING_INFO if missing > 0
-                else CriteriaStatus.NOT_MET
+                CriteriaStatus.MET
+                if req_unmet == 0 and missing == 0
+                else (
+                    CriteriaStatus.MISSING_INFO
+                    if missing > 0
+                    else CriteriaStatus.NOT_MET
+                )
             ),
             missing_info_list=missing_info,
             evaluated_at=datetime.now(timezone.utc),
@@ -224,9 +434,13 @@ class CriteriaEngine:
 
         reasoning = " ".join(reasoning_parts)
         inference_ms = (time.perf_counter() - t0) * 1000
-        log.info("criteria_engine.analyzed",
-                 pa=submission.pa_number, confidence=round(confidence, 3),
-                 route=route, ms=round(inference_ms))
+        log.info(
+            "criteria_engine.analyzed",
+            pa=submission.pa_number,
+            confidence=round(confidence, 3),
+            route=route,
+            ms=round(inference_ms),
+        )
 
         return AIRecommendation(
             pa_number=submission.pa_number or "PENDING",
@@ -252,10 +466,10 @@ class CriteriaEngine:
     @staticmethod
     def _map_service_type(stype: ServiceType) -> str:
         mapping = {
-            ServiceType.DIAGNOSTIC_IMAGING:   "DIAGNOSTIC_IMAGING",
-            ServiceType.SURGICAL_PROCEDURE:   "SURGICAL_PROCEDURE",
+            ServiceType.DIAGNOSTIC_IMAGING: "DIAGNOSTIC_IMAGING",
+            ServiceType.SURGICAL_PROCEDURE: "SURGICAL_PROCEDURE",
             ServiceType.SPECIALTY_MEDICATION: "SPECIALTY_MEDICATION",
-            ServiceType.PHYSICAL_THERAPY:     "PHYSICAL_THERAPY",
+            ServiceType.PHYSICAL_THERAPY: "PHYSICAL_THERAPY",
         }
         return mapping.get(stype, "DEFAULT")
 
@@ -266,7 +480,9 @@ class CriteriaEngine:
             if doc.extracted_text:
                 parts.append(doc.extracted_text)
         # Add diagnosis/procedure context
-        dx_descs = [d.description or d.code for d in submission.diagnoses if d.description]
+        dx_descs = [
+            d.description or d.code for d in submission.diagnoses if d.description
+        ]
         if dx_descs:
             parts.append("Diagnoses: " + "; ".join(dx_descs))
         return "\n\n".join(parts).lower()
@@ -296,16 +512,18 @@ class CriteriaEngine:
                 status = CriteriaStatus.NOT_MET
                 evidence = f"Required keywords not found: {', '.join(keywords[:3])}"
 
-            results.append(CriterionResult(
-                criterion_id=cdef["id"],
-                criterion_name=cdef["name"],
-                guideline_source=cdef["source"],
-                guideline_version=settings.MCG_VERSION,
-                status=status,
-                evidence_text=evidence,
-                weight=cdef["weight"],
-                required=cdef["required"],
-            ))
+            results.append(
+                CriterionResult(
+                    criterion_id=cdef["id"],
+                    criterion_name=cdef["name"],
+                    guideline_source=cdef["source"],
+                    guideline_version=settings.MCG_VERSION,
+                    status=status,
+                    evidence_text=evidence,
+                    weight=cdef["weight"],
+                    required=cdef["required"],
+                )
+            )
         return results
 
     @staticmethod
@@ -321,7 +539,9 @@ class CriteriaEngine:
             icd_validation["high_approval"] = any(
                 code_clean.startswith(prefix) for prefix in HIGH_APPROVAL_DX
             )
-            icd_validation["oncology"] = code_clean.startswith("C") or code_clean.startswith("D")
+            icd_validation["oncology"] = code_clean.startswith(
+                "C"
+            ) or code_clean.startswith("D")
         signals["icd10"] = icd_validation
 
         # Step therapy
@@ -347,7 +567,10 @@ class CriteriaEngine:
         criteria: List[CriterionResult],
         code_signals: Dict,
         submission: PASubmissionRequest,
-        met: int, not_met: int, missing: int, req_unmet: int,
+        met: int,
+        not_met: int,
+        missing: int,
+        req_unmet: int,
     ) -> Tuple[float, List[str]]:
         reasoning: List[str] = []
 
@@ -356,18 +579,26 @@ class CriteriaEngine:
         if total_weight == 0:
             base_score = 0.5
         else:
-            met_weight = sum(c.weight for c in criteria if c.status == CriteriaStatus.MET)
-            partial_weight = sum(c.weight * 0.5 for c in criteria if c.status == CriteriaStatus.PARTIAL)
+            met_weight = sum(
+                c.weight for c in criteria if c.status == CriteriaStatus.MET
+            )
+            partial_weight = sum(
+                c.weight * 0.5 for c in criteria if c.status == CriteriaStatus.PARTIAL
+            )
             base_score = (met_weight + partial_weight) / total_weight
 
         score = base_score
-        reasoning.append(f"Criteria score: {base_score:.0%} ({met} met, {not_met} not met, {missing} missing info).")
+        reasoning.append(
+            f"Criteria score: {base_score:.0%} ({met} met, {not_met} not met, {missing} missing info)."
+        )
 
         # ICD-10 boost
         icd = code_signals.get("icd10", {})
         if icd.get("high_approval"):
             score = min(1.0, score + 0.08)
-            reasoning.append("Diagnosis code carries strong medical necessity evidence base (+8%).")
+            reasoning.append(
+                "Diagnosis code carries strong medical necessity evidence base (+8%)."
+            )
         if icd.get("oncology"):
             score = min(1.0, score + 0.05)
             reasoning.append("Oncology diagnosis — expedited pathway (+5%).")
@@ -376,12 +607,16 @@ class CriteriaEngine:
         if req_unmet > 0:
             penalty = req_unmet * 0.15
             score = max(0.0, score - penalty)
-            reasoning.append(f"{req_unmet} required criterion/criteria not met (−{penalty:.0%}).")
+            reasoning.append(
+                f"{req_unmet} required criterion/criteria not met (−{penalty:.0%})."
+            )
 
         # Missing info neutral drag
         if missing > 0:
             score = max(0.0, score - missing * 0.05)
-            reasoning.append(f"{missing} item(s) need additional documentation (−{missing*5}%).")
+            reasoning.append(
+                f"{missing} item(s) need additional documentation (−{missing*5}%)."
+            )
 
         # Urgency — emergency doesn't change threshold but flags for expedited
         if submission.urgency == UrgencyLevel.EMERGENCY:
@@ -398,7 +633,9 @@ class CriteriaEngine:
         # Clinical summary length heuristic
         if len(submission.clinical_summary) < 100:
             score = max(0.0, score - 0.10)
-            reasoning.append("Clinical summary is brief — additional documentation recommended (−10%).")
+            reasoning.append(
+                "Clinical summary is brief — additional documentation recommended (−10%)."
+            )
         elif len(submission.clinical_summary) > 500:
             score = min(1.0, score + 0.03)
             reasoning.append("Detailed clinical summary provided (+3%).")
@@ -420,20 +657,27 @@ class CriteriaEngine:
         if confidence <= settings.AUTO_DENY_THRESHOLD and req_unmet > 0:
             if settings.ENABLE_AUTO_DENY:
                 return "DENY", RouteDecision.AUTO_DENY
-            return "DENY", RouteDecision.ESCALATE   # Requires MD even if auto-deny off
+            return "DENY", RouteDecision.ESCALATE  # Requires MD even if auto-deny off
 
         # Missing info → request additional documentation
         if missing > 0 and confidence < 0.60:
             return "REQUEST_INFO", RouteDecision.HUMAN_REVIEW
 
         # Auto-approve band
-        if confidence >= settings.AUTO_APPROVE_THRESHOLD and req_unmet == 0 and missing == 0:
+        if (
+            confidence >= settings.AUTO_APPROVE_THRESHOLD
+            and req_unmet == 0
+            and missing == 0
+        ):
             if settings.ENABLE_AUTO_APPROVE:
                 return "APPROVE", RouteDecision.AUTO_APPROVE
             return "APPROVE", RouteDecision.HUMAN_REVIEW
 
         # Gray zone or high-risk service types always get human eyes
-        if submission.service_type in (ServiceType.SURGICAL_PROCEDURE, ServiceType.INPATIENT):
+        if submission.service_type in (
+            ServiceType.SURGICAL_PROCEDURE,
+            ServiceType.INPATIENT,
+        ):
             return "APPROVE" if confidence > 0.7 else "PEND", RouteDecision.HUMAN_REVIEW
 
         # Middle confidence band
@@ -460,7 +704,9 @@ class CriteriaEngine:
     def _compute_missing_info(submission: PASubmissionRequest) -> List[str]:
         missing = []
         if not submission.documents:
-            missing.append("Supporting clinical documentation (no attachments provided)")
+            missing.append(
+                "Supporting clinical documentation (no attachments provided)"
+            )
         if len(submission.clinical_summary) < 50:
             missing.append("Detailed clinical summary (minimum 50 characters)")
         if not any(d.is_primary for d in submission.diagnoses):
@@ -468,12 +714,26 @@ class CriteriaEngine:
         return missing
 
     @staticmethod
-    def _get_alternatives(submission: PASubmissionRequest, recommendation: str) -> List[str]:
+    def _get_alternatives(
+        submission: PASubmissionRequest, recommendation: str
+    ) -> List[str]:
         if recommendation not in ("DENY", "PEND"):
             return []
         alts = {
-            ServiceType.DIAGNOSTIC_IMAGING:   ["Plain X-ray if not yet performed", "Clinical reassessment at 6 weeks"],
-            ServiceType.SURGICAL_PROCEDURE:   ["Continue conservative therapy 4–6 additional weeks", "Pain management consultation"],
-            ServiceType.SPECIALTY_MEDICATION: ["Trial of preferred formulary agent", "Biosimilar substitution if applicable"],
+            ServiceType.DIAGNOSTIC_IMAGING: [
+                "Plain X-ray if not yet performed",
+                "Clinical reassessment at 6 weeks",
+            ],
+            ServiceType.SURGICAL_PROCEDURE: [
+                "Continue conservative therapy 4–6 additional weeks",
+                "Pain management consultation",
+            ],
+            ServiceType.SPECIALTY_MEDICATION: [
+                "Trial of preferred formulary agent",
+                "Biosimilar substitution if applicable",
+            ],
         }
-        return alts.get(submission.service_type, ["Conservative management", "Alternative covered service"])
+        return alts.get(
+            submission.service_type,
+            ["Conservative management", "Alternative covered service"],
+        )

@@ -2,6 +2,7 @@
 AI Engine API — /api/v1/analyze
 Core endpoint: submit PA for AI analysis, returns recommendation.
 """
+
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
@@ -12,14 +13,23 @@ from app.core.database import get_db
 from app.core.security import encrypt_phi
 from app.api.deps import get_current_user
 from app.schemas.pa_schemas import (
-    PASubmissionRequest, AIRecommendation, AutoDecisionResult,
-    EligibilityRequest, EligibilityResult, DocumentExtractionRequest,
+    PASubmissionRequest,
+    AIRecommendation,
+    AutoDecisionResult,
+    EligibilityRequest,
+    EligibilityResult,
+    DocumentExtractionRequest,
     DocumentExtractionResult,
 )
 from app.services.criteria_engine import CriteriaEngine
 from app.services.nlp_extractor import NLPExtractor
 from app.services.auto_decision import AutoDecisionService
-from app.utils.helpers import generate_pa_number, EventPublisher, AuditLogger, EligibilityChecker
+from app.utils.helpers import (
+    generate_pa_number,
+    EventPublisher,
+    AuditLogger,
+    EligibilityChecker,
+)
 from app.models.pa_models import PACase, PADecision
 import structlog
 
@@ -28,7 +38,9 @@ router = APIRouter()
 
 
 # ── POST /analyze ─────────────────────────────────────────────────────────────
-@router.post("/analyze", response_model=AIRecommendation, status_code=status.HTTP_200_OK)
+@router.post(
+    "/analyze", response_model=AIRecommendation, status_code=status.HTTP_200_OK
+)
 async def analyze_pa(
     submission: PASubmissionRequest,
     background_tasks: BackgroundTasks,
@@ -50,15 +62,15 @@ async def analyze_pa(
     result = await CriteriaEngine.analyze(submission)
 
     # Persist case + AI result async
-    background_tasks.add_task(
-        _persist_case, submission, result, db, current_user
-    )
+    background_tasks.add_task(_persist_case, submission, result, db, current_user)
 
     return result
 
 
 # ── POST /analyze/with-decision ───────────────────────────────────────────────
-@router.post("/analyze/with-decision", response_model=dict, status_code=status.HTTP_200_OK)
+@router.post(
+    "/analyze/with-decision", response_model=dict, status_code=status.HTTP_200_OK
+)
 async def analyze_and_decide(
     submission: PASubmissionRequest,
     background_tasks: BackgroundTasks,
@@ -83,7 +95,10 @@ async def analyze_and_decide(
         EventPublisher.publish_decision,
         submission.pa_number,
         decision_result.decision.value,
-        {"confidence": ai_result.confidence_score, "route": ai_result.route_decision.value}
+        {
+            "confidence": ai_result.confidence_score,
+            "route": ai_result.route_decision.value,
+        },
     )
 
     # 4. Audit log
@@ -149,6 +164,7 @@ async def get_pa_status(
 ):
     """Get current status and AI analysis for a PA case."""
     from sqlalchemy import select
+
     result = await db.execute(select(PACase).where(PACase.pa_number == pa_number))
     case = result.scalar_one_or_none()
     if not case:
@@ -179,6 +195,7 @@ async def record_reviewer_decision(
     Requires MD co-sign for denials (FR-204).
     """
     from sqlalchemy import select
+
     result = await db.execute(select(PACase).where(PACase.pa_number == pa_number))
     case = result.scalar_one_or_none()
     if not case:
@@ -190,11 +207,14 @@ async def record_reviewer_decision(
 
     # Require MD co-sign for denials
     if decision_value == "DENIED" and not payload.get("md_cosign_id"):
-        raise HTTPException(status_code=422,
-                            detail="MD co-signature required for denial (FR-204)")
+        raise HTTPException(
+            status_code=422, detail="MD co-signature required for denial (FR-204)"
+        )
 
     # Track AI agreement
-    ai_agreed = case.ai_recommendation == decision_value if case.ai_recommendation else None
+    ai_agreed = (
+        case.ai_recommendation == decision_value if case.ai_recommendation else None
+    )
 
     # Create decision record
     decision = PADecision(
@@ -232,8 +252,10 @@ async def record_reviewer_decision(
         phi_fields="pa_case",
     )
     background_tasks.add_task(
-        EventPublisher.publish_decision, pa_number, decision_value,
-        {"reviewer": current_user.get("name"), "ai_agreed": ai_agreed}
+        EventPublisher.publish_decision,
+        pa_number,
+        decision_value,
+        {"reviewer": current_user.get("name"), "ai_agreed": ai_agreed},
     )
 
     return {"pa_number": pa_number, "decision": decision_value, "ai_agreed": ai_agreed}
@@ -249,12 +271,13 @@ async def _persist_case(
     """Persist PA case + AI analysis to DB (background task)."""
     try:
         from sqlalchemy import select
+
         # Check if case already exists
         existing = await db.execute(
             select(PACase).where(PACase.pa_number == submission.pa_number)
         )
         if existing.scalar_one_or_none():
-            return   # Already persisted
+            return  # Already persisted
 
         deadline = AutoDecisionService.compute_sla_deadline(submission)
         member = submission.member
@@ -268,13 +291,21 @@ async def _persist_case(
             payer=member.payer.value,
             provider_npi=submission.provider.npi,
             provider_name=submission.provider.name,
-            primary_diagnosis_code=submission.primary_diagnosis.code if submission.primary_diagnosis else "",
+            primary_diagnosis_code=(
+                submission.primary_diagnosis.code
+                if submission.primary_diagnosis
+                else ""
+            ),
             primary_procedure_code=proc.code if proc else "",
             service_type=submission.service_type.value,
             urgency=submission.urgency.value,
             requested_units=submission.requested_units,
             clinical_summary_enc=encrypt_phi(submission.clinical_summary),
-            status="IN_REVIEW" if ai_result.route_decision.value.startswith("HUMAN") else "SUBMITTED",
+            status=(
+                "IN_REVIEW"
+                if ai_result.route_decision.value.startswith("HUMAN")
+                else "SUBMITTED"
+            ),
             sla_deadline=deadline,
             ai_confidence=ai_result.confidence_score,
             ai_recommendation=ai_result.recommendation,

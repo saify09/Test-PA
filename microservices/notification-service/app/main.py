@@ -10,6 +10,7 @@ Multi-channel notification delivery (FR-301 to FR-307):
   - Template engine with clinical language rules
   - HIPAA-safe notification content
 """
+
 from __future__ import annotations
 import asyncio, json, uuid
 from datetime import datetime, timezone, timedelta
@@ -43,7 +44,10 @@ class Settings(BaseSettings):
     TWILIO_FROM_NUMBER: str = "+18005551234"
     # AWS SES fallback
     AWS_SES_REGION: str = "us-east-1"
-    class Config: env_file = ".env"
+
+    class Config:
+        env_file = ".env"
+
 
 settings = Settings()
 
@@ -242,45 +246,48 @@ PA System""",
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 class NotificationRequest(BaseModel):
-    pa_number:      Optional[str] = None
-    event_type:     str
+    pa_number: Optional[str] = None
+    event_type: str
     recipient_type: str  # PROVIDER | MEMBER | ADMIN | REVIEWER
-    recipient_id:   str
+    recipient_id: str
     recipient_name: str = "Valued Member"
     recipient_email: Optional[str] = None
     recipient_phone: Optional[str] = None
-    recipient_fax:   Optional[str] = None
-    channel:        str = "EMAIL"   # EMAIL | SMS | PORTAL | FAX | ALL
-    language:       str = "en"
-    template_id:    str
-    template_vars:  Dict[str, Any] = {}
-    priority:       str = "NORMAL"  # HIGH | NORMAL | LOW
-    scheduled_at:   Optional[str] = None  # ISO datetime for scheduled delivery
+    recipient_fax: Optional[str] = None
+    channel: str = "EMAIL"  # EMAIL | SMS | PORTAL | FAX | ALL
+    language: str = "en"
+    template_id: str
+    template_vars: Dict[str, Any] = {}
+    priority: str = "NORMAL"  # HIGH | NORMAL | LOW
+    scheduled_at: Optional[str] = None  # ISO datetime for scheduled delivery
+
 
 class NotificationResult(BaseModel):
     notification_id: str
-    pa_number:       Optional[str]
-    template_id:     str
-    channels_sent:   List[str]
+    pa_number: Optional[str]
+    template_id: str
+    channels_sent: List[str]
     channels_failed: List[str]
-    sent_at:         str
-    status:          str
+    sent_at: str
+    status: str
+
 
 class BulkNotificationRequest(BaseModel):
-    event_type:     str
-    template_id:    str
-    recipients:     List[Dict[str, Any]]
-    template_vars:  Dict[str, Any] = {}
-    channel:        str = "EMAIL"
+    event_type: str
+    template_id: str
+    recipients: List[Dict[str, Any]]
+    template_vars: Dict[str, Any] = {}
+    channel: str = "EMAIL"
+
 
 class NotificationPreferences(BaseModel):
-    recipient_id:    str
-    email_enabled:   bool = True
-    sms_enabled:     bool = True
-    portal_enabled:  bool = True
-    language:        str = "en"
-    email:           Optional[str] = None
-    phone:           Optional[str] = None
+    recipient_id: str
+    email_enabled: bool = True
+    sms_enabled: bool = True
+    portal_enabled: bool = True
+    language: str = "en"
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 
 # ── Delivery engines ──────────────────────────────────────────────────────────
@@ -292,13 +299,16 @@ async def send_email(to: str, subject: str, body: str, from_name: str = None) ->
     try:
         import sendgrid
         from sendgrid.helpers.mail import Mail
+
         sg = sendgrid.SendGridAPIClient(api_key=settings.SMTP_PASSWORD)
         message = Mail(
             from_email=(settings.EMAIL_FROM, from_name or settings.EMAIL_FROM_NAME),
-            to_emails=to, subject=subject, plain_text_content=body,
+            to_emails=to,
+            subject=subject,
+            plain_text_content=body,
         )
         sg.send(message)
-        log.info("email.sent", to=to[:3]+"***", subject=subject[:30])
+        log.info("email.sent", to=to[:3] + "***", subject=subject[:30])
         return True
     except ImportError:
         pass
@@ -310,9 +320,10 @@ async def send_email(to: str, subject: str, body: str, from_name: str = None) ->
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
+
         msg = MIMEMultipart()
-        msg["From"]    = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>"
-        msg["To"]      = to
+        msg["From"] = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>"
+        msg["To"] = to
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
@@ -334,8 +345,11 @@ async def send_sms(to: str, body: str) -> bool:
         return False
     try:
         from twilio.rest import Client
+
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        client.messages.create(body=body[:160], from_=settings.TWILIO_FROM_NUMBER, to=to)
+        client.messages.create(
+            body=body[:160], from_=settings.TWILIO_FROM_NUMBER, to=to
+        )
         log.info("sms.sent", to=to[-4:])
         return True
     except ImportError:
@@ -346,17 +360,25 @@ async def send_sms(to: str, body: str) -> bool:
     return True  # Mock success
 
 
-async def send_portal_notification(recipient_id: str, title: str, body: str,
-                                    pa_number: Optional[str] = None) -> bool:
+async def send_portal_notification(
+    recipient_id: str, title: str, body: str, pa_number: Optional[str] = None
+) -> bool:
     """Push portal in-app notification via Redis pub/sub."""
     try:
         import redis.asyncio as redis
+
         r = redis.from_url(settings.REDIS_URL, decode_responses=True)
-        payload = json.dumps({
-            "id": str(uuid.uuid4()), "recipient_id": recipient_id,
-            "title": title, "body": body[:200], "pa_number": pa_number,
-            "timestamp": datetime.now(timezone.utc).isoformat(), "read": False,
-        })
+        payload = json.dumps(
+            {
+                "id": str(uuid.uuid4()),
+                "recipient_id": recipient_id,
+                "title": title,
+                "body": body[:200],
+                "pa_number": pa_number,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "read": False,
+            }
+        )
         await r.publish(f"notifications:{recipient_id}", payload)
         await r.lpush(f"notif_inbox:{recipient_id}", payload)
         await r.ltrim(f"notif_inbox:{recipient_id}", 0, 99)  # Keep last 100
@@ -368,10 +390,14 @@ async def send_portal_notification(recipient_id: str, title: str, body: str,
         return True  # Mock success
 
 
-def render_template(template_id: str, language: str, vars: Dict[str, Any]) -> Dict[str, str]:
+def render_template(
+    template_id: str, language: str, vars: Dict[str, Any]
+) -> Dict[str, str]:
     """Render notification template with variable substitution."""
     lang = language if language in ("en", "es") else "en"
-    tmpl = TEMPLATES.get(template_id, {}).get(lang) or TEMPLATES.get(template_id, {}).get("en", {})
+    tmpl = TEMPLATES.get(template_id, {}).get(lang) or TEMPLATES.get(
+        template_id, {}
+    ).get("en", {})
 
     if not tmpl:
         return {
@@ -396,16 +422,20 @@ _notification_log: List[Dict[str, Any]] = []
 
 async def dispatch_notification(req: NotificationRequest) -> NotificationResult:
     """Route and dispatch notification across requested channels."""
-    notif_id       = str(uuid.uuid4())
-    channels_sent  : List[str] = []
+    notif_id = str(uuid.uuid4())
+    channels_sent: List[str] = []
     channels_failed: List[str] = []
     now = datetime.now(timezone.utc)
 
-    rendered = render_template(req.template_id, req.language, {
-        "recipient_name": req.recipient_name,
-        "pa_number": req.pa_number or "",
-        **req.template_vars,
-    })
+    rendered = render_template(
+        req.template_id,
+        req.language,
+        {
+            "recipient_name": req.recipient_name,
+            "pa_number": req.pa_number or "",
+            **req.template_vars,
+        },
+    )
 
     channels = [req.channel] if req.channel != "ALL" else ["EMAIL", "SMS", "PORTAL"]
 
@@ -419,12 +449,15 @@ async def dispatch_notification(req: NotificationRequest) -> NotificationResult:
                     rendered.get("email_body", ""),
                 )
             elif channel == "SMS" and req.recipient_phone:
-                ok = await send_sms(req.recipient_phone, rendered.get("sms", rendered.get("email_body","")[:160]))
+                ok = await send_sms(
+                    req.recipient_phone,
+                    rendered.get("sms", rendered.get("email_body", "")[:160]),
+                )
             elif channel == "PORTAL":
                 ok = await send_portal_notification(
                     req.recipient_id,
                     rendered.get("subject", "PA System Notification"),
-                    rendered.get("sms", rendered.get("email_body","")[:200]),
+                    rendered.get("sms", rendered.get("email_body", "")[:200]),
                     req.pa_number,
                 )
             else:
@@ -436,16 +469,25 @@ async def dispatch_notification(req: NotificationRequest) -> NotificationResult:
             log.error("dispatch.channel_failed", channel=channel, error=str(e))
 
     result = {
-        "notification_id": notif_id, "pa_number": req.pa_number,
-        "template_id": req.template_id, "event_type": req.event_type,
-        "recipient_id": req.recipient_id, "channels_sent": channels_sent,
-        "channels_failed": channels_failed, "sent_at": now.isoformat(),
+        "notification_id": notif_id,
+        "pa_number": req.pa_number,
+        "template_id": req.template_id,
+        "event_type": req.event_type,
+        "recipient_id": req.recipient_id,
+        "channels_sent": channels_sent,
+        "channels_failed": channels_failed,
+        "sent_at": now.isoformat(),
         "status": "DELIVERED" if channels_sent else "FAILED",
     }
     _notification_log.append(result)
 
-    log.info("notification.dispatched", notif=notif_id, template=req.template_id,
-             channels=channels_sent, pa=req.pa_number)
+    log.info(
+        "notification.dispatched",
+        notif=notif_id,
+        template=req.template_id,
+        channels=channels_sent,
+        pa=req.pa_number,
+    )
 
     return NotificationResult(**result)
 
@@ -456,29 +498,45 @@ async def lifespan(app: FastAPI):
     log.info("notification_service.starting", port=8005)
     yield
 
+
 app = FastAPI(
     title="Notification Service",
     description="Multi-channel HIPAA-compliant notification delivery with template engine",
     version=settings.APP_VERSION,
     lifespan=lifespan,
 )
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
+
 
 @app.get("/health")
 async def health():
-    return {"status":"healthy","service":"notifications","version":settings.APP_VERSION}
+    return {
+        "status": "healthy",
+        "service": "notifications",
+        "version": settings.APP_VERSION,
+    }
+
 
 @app.post("/notify/send", response_model=NotificationResult)
-async def send_notification(req: NotificationRequest, background_tasks: BackgroundTasks):
+async def send_notification(
+    req: NotificationRequest, background_tasks: BackgroundTasks
+):
     """Send notification via specified channel(s) (FR-301–307)."""
     if req.priority == "HIGH":
         return await dispatch_notification(req)
     background_tasks.add_task(dispatch_notification, req)
     return NotificationResult(
-        notification_id=str(uuid.uuid4()), pa_number=req.pa_number,
-        template_id=req.template_id, channels_sent=[], channels_failed=[],
-        sent_at=datetime.now(timezone.utc).isoformat(), status="QUEUED",
+        notification_id=str(uuid.uuid4()),
+        pa_number=req.pa_number,
+        template_id=req.template_id,
+        channels_sent=[],
+        channels_failed=[],
+        sent_at=datetime.now(timezone.utc).isoformat(),
+        status="QUEUED",
     )
+
 
 @app.post("/notify/bulk")
 async def bulk_notify(req: BulkNotificationRequest, background_tasks: BackgroundTasks):
@@ -486,21 +544,27 @@ async def bulk_notify(req: BulkNotificationRequest, background_tasks: Background
     queued = []
     for r in req.recipients:
         notif = NotificationRequest(
-            event_type=req.event_type, template_id=req.template_id,
-            recipient_type=r.get("type","PROVIDER"), recipient_id=r["id"],
-            recipient_name=r.get("name",""), recipient_email=r.get("email"),
-            recipient_phone=r.get("phone"), channel=req.channel,
+            event_type=req.event_type,
+            template_id=req.template_id,
+            recipient_type=r.get("type", "PROVIDER"),
+            recipient_id=r["id"],
+            recipient_name=r.get("name", ""),
+            recipient_email=r.get("email"),
+            recipient_phone=r.get("phone"),
+            channel=req.channel,
             template_vars={**req.template_vars, **r.get("vars", {})},
         )
         background_tasks.add_task(dispatch_notification, notif)
         queued.append(r["id"])
     return {"queued": len(queued), "recipient_ids": queued}
 
+
 @app.get("/notify/inbox/{recipient_id}")
 async def get_inbox(recipient_id: str, limit: int = Query(20, le=100)):
     """Get portal notification inbox for a recipient."""
     try:
         import redis.asyncio as redis
+
         r = redis.from_url(settings.REDIS_URL, decode_responses=True)
         items = await r.lrange(f"notif_inbox:{recipient_id}", 0, limit - 1)
         await r.aclose()
@@ -508,28 +572,39 @@ async def get_inbox(recipient_id: str, limit: int = Query(20, le=100)):
     except Exception:
         return {"items": [], "count": 0}
 
+
 @app.get("/notify/templates")
 async def list_templates():
     return {"templates": list(TEMPLATES.keys()), "languages": ["en", "es"]}
+
 
 @app.get("/notify/log")
 async def notification_log(limit: int = Query(50, le=200)):
     return {"items": _notification_log[-limit:], "total": len(_notification_log)}
 
+
 @app.get("/notify/templates/{template_id}/preview")
 async def preview_template(template_id: str, language: str = "en"):
     """Preview rendered template with sample data."""
     sample_vars = {
-        "pa_number": "PA-2026-123456", "auth_number": "UHC20260310ABC123",
-        "service_description": "MRI Lumbar Spine", "approved_units": "1",
-        "auth_start": "2026-04-01", "auth_end": "2026-07-01",
+        "pa_number": "PA-2026-123456",
+        "auth_number": "UHC20260310ABC123",
+        "service_description": "MRI Lumbar Spine",
+        "approved_units": "1",
+        "auth_start": "2026-04-01",
+        "auth_end": "2026-07-01",
         "denial_reason": "Step therapy requirements not met",
-        "appeal_deadline": "2026-05-10", "info_deadline": "2026-03-17",
+        "appeal_deadline": "2026-05-10",
+        "info_deadline": "2026-03-17",
         "missing_info_list": "  • Operative report\n  • Physical therapy records",
-        "hours_remaining": "4.5", "sla_deadline": "2026-03-11T08:00:00Z",
-        "current_status": "IN_REVIEW", "reviewer_name": "Dr. Sarah Parker",
-        "appeal_number": "APP-2026-001234", "appeal_type": "STANDARD",
-        "deadline": "2026-04-10", "username": "member@email.com",
+        "hours_remaining": "4.5",
+        "sla_deadline": "2026-03-11T08:00:00Z",
+        "current_status": "IN_REVIEW",
+        "reviewer_name": "Dr. Sarah Parker",
+        "appeal_number": "APP-2026-001234",
+        "appeal_type": "STANDARD",
+        "deadline": "2026-04-10",
+        "username": "member@email.com",
         "recipient_name": "John Doe",
     }
     rendered = render_template(template_id, language, sample_vars)
@@ -541,12 +616,13 @@ async def preview_template(template_id: str, language: str = "en"):
 # ── FR-303: EHR FHIR Update after decision ────────────────────────────────────
 import httpx
 
+
 class FHIRUpdateRequest(BaseModel):
     pa_id: str
     pa_number: str
-    ehr_system: str           # EPIC | CERNER | MEDITECH | ALLSCRIPTS | GENERIC_FHIR
-    fhir_endpoint: str        # Base FHIR R4 endpoint URL
-    decision: str             # APPROVED | DENIED | PENDED
+    ehr_system: str  # EPIC | CERNER | MEDITECH | ALLSCRIPTS | GENERIC_FHIR
+    fhir_endpoint: str  # Base FHIR R4 endpoint URL
+    decision: str  # APPROVED | DENIED | PENDED
     auth_number: Optional[str] = None
     auth_start: Optional[str] = None
     auth_end: Optional[str] = None
@@ -556,6 +632,7 @@ class FHIRUpdateRequest(BaseModel):
     patient_fhir_id: Optional[str] = None
     claim_fhir_id: Optional[str] = None
 
+
 class FHIRUpdateResult(BaseModel):
     success: bool
     pa_id: str
@@ -564,16 +641,26 @@ class FHIRUpdateResult(BaseModel):
     fhir_response_status: Optional[int] = None
     error: Optional[str] = None
 
-@app.post("/notify/ehr-update", response_model=FHIRUpdateResult, tags=["EHR Integration"])
-async def update_ehr_via_fhir(req: FHIRUpdateRequest, background_tasks: BackgroundTasks):
+
+@app.post(
+    "/notify/ehr-update", response_model=FHIRUpdateResult, tags=["EHR Integration"]
+)
+async def update_ehr_via_fhir(
+    req: FHIRUpdateRequest, background_tasks: BackgroundTasks
+):
     """
     FR-303: Update EHR systems with authorization details via HL7/FHIR R4.
     Sends a FHIR ClaimResponse resource back to the originating EHR.
     Supports Epic, Cerner, Meditech, Allscripts, and generic FHIR R4.
     """
     background_tasks.add_task(_send_fhir_update, req)
-    return FHIRUpdateResult(success=True, pa_id=req.pa_id, ehr_system=req.ehr_system,
-                            fhir_resource_id=f"ClaimResponse/{req.pa_id}")
+    return FHIRUpdateResult(
+        success=True,
+        pa_id=req.pa_id,
+        ehr_system=req.ehr_system,
+        fhir_resource_id=f"ClaimResponse/{req.pa_id}",
+    )
+
 
 async def _send_fhir_update(req: FHIRUpdateRequest) -> None:
     """Build and POST a FHIR R4 ClaimResponse resource to the EHR."""
@@ -589,17 +676,34 @@ async def _send_fhir_update(req: FHIRUpdateRequest) -> None:
         "resourceType": "ClaimResponse",
         "id": req.pa_id,
         "status": "active",
-        "type": {"coding": [{"system": "http://terminology.hl7.org/CodeSystem/claim-type", "code": "professional"}]},
+        "type": {
+            "coding": [
+                {
+                    "system": "http://terminology.hl7.org/CodeSystem/claim-type",
+                    "code": "professional",
+                }
+            ]
+        },
         "use": "preauthorization",
         "outcome": outcome_map.get(req.decision, "partial"),
         "disposition": disposition_map.get(req.decision, ""),
         "preAuthRef": req.auth_number or req.pa_number,
-        "preAuthPeriod": {
-            "start": req.auth_start,
-            "end": req.auth_end,
-        } if req.auth_start else None,
-        "patient": {"reference": f"Patient/{req.patient_fhir_id}"} if req.patient_fhir_id else None,
-        "request": {"reference": f"Claim/{req.claim_fhir_id}"} if req.claim_fhir_id else None,
+        "preAuthPeriod": (
+            {
+                "start": req.auth_start,
+                "end": req.auth_end,
+            }
+            if req.auth_start
+            else None
+        ),
+        "patient": (
+            {"reference": f"Patient/{req.patient_fhir_id}"}
+            if req.patient_fhir_id
+            else None
+        ),
+        "request": (
+            {"reference": f"Claim/{req.claim_fhir_id}"} if req.claim_fhir_id else None
+        ),
     }
 
     try:
@@ -607,12 +711,22 @@ async def _send_fhir_update(req: FHIRUpdateRequest) -> None:
             resp = await client.post(
                 f"{req.fhir_endpoint}/ClaimResponse",
                 json=claim_response,
-                headers={"Content-Type": "application/fhir+json", "Accept": "application/fhir+json"},
+                headers={
+                    "Content-Type": "application/fhir+json",
+                    "Accept": "application/fhir+json",
+                },
             )
             resp.raise_for_status()
-            log.info("fhir.update.sent", pa_id=req.pa_id, ehr=req.ehr_system, status=resp.status_code)
+            log.info(
+                "fhir.update.sent",
+                pa_id=req.pa_id,
+                ehr=req.ehr_system,
+                status=resp.status_code,
+            )
     except Exception as exc:
-        log.error("fhir.update.failed", pa_id=req.pa_id, ehr=req.ehr_system, error=str(exc))
+        log.error(
+            "fhir.update.failed", pa_id=req.pa_id, ehr=req.ehr_system, error=str(exc)
+        )
 
 
 # ── FR-305: Alternative treatments in denial notifications ────────────────────
@@ -622,14 +736,17 @@ class DenialWithAlternativesRequest(BaseModel):
     patient_name: str
     service_description: str
     denial_reason: str
-    alternative_treatments: List[str]     # FR-305: suggested alternatives
+    alternative_treatments: List[str]  # FR-305: suggested alternatives
     appeal_deadline: str
     provider_email: str
     member_email: Optional[str] = None
     language: str = "en"
 
+
 @app.post("/notify/denial-with-alternatives", tags=["Notifications"])
-async def send_denial_with_alternatives(req: DenialWithAlternativesRequest, background_tasks: BackgroundTasks):
+async def send_denial_with_alternatives(
+    req: DenialWithAlternativesRequest, background_tasks: BackgroundTasks
+):
     """
     FR-305: Send denial notification including alternative treatment options.
     FR-306: Includes appeal instructions and deadlines.
@@ -672,34 +789,50 @@ PA Authorization System"""
 
     background_tasks.add_task(send_email, req.provider_email, subject, body)
     if req.member_email:
-        background_tasks.add_task(send_email, req.member_email,
+        background_tasks.add_task(
+            send_email,
+            req.member_email,
             f"{'Decisión sobre su autorización previa' if req.language == 'es' else 'Update on your prior authorization'} — {req.pa_number}",
-            body)
-    return {"status": "queued", "pa_number": req.pa_number, "alternatives_included": len(req.alternative_treatments)}
+            body,
+        )
+    return {
+        "status": "queued",
+        "pa_number": req.pa_number,
+        "alternatives_included": len(req.alternative_treatments),
+    }
 
 
 # ── TR-301: HL7 v2.x interface ─────────────────────────────────────────────────
 class HL7NotificationRequest(BaseModel):
     pa_id: str
     pa_number: str
-    hl7_endpoint: str           # MLLP endpoint host:port for HL7 v2 delivery
-    message_type: str           # ACK | QRY_A19 | ADT_A08
+    hl7_endpoint: str  # MLLP endpoint host:port for HL7 v2 delivery
+    message_type: str  # ACK | QRY_A19 | ADT_A08
     patient_mrn: str
     decision: str
     auth_number: Optional[str] = None
 
+
 @app.post("/notify/hl7", tags=["EHR Integration"])
-async def send_hl7_notification(req: HL7NotificationRequest, background_tasks: BackgroundTasks):
+async def send_hl7_notification(
+    req: HL7NotificationRequest, background_tasks: BackgroundTasks
+):
     """
     TR-301: Send HL7 v2.x notification to legacy EHR systems via MLLP.
     Sends ORU^R01 (unsolicited observation result) with PA decision.
     """
     background_tasks.add_task(_send_hl7_mllp, req)
-    return {"status": "queued", "pa_id": req.pa_id, "hl7_message_type": req.message_type}
+    return {
+        "status": "queued",
+        "pa_id": req.pa_id,
+        "hl7_message_type": req.message_type,
+    }
+
 
 async def _send_hl7_mllp(req: HL7NotificationRequest) -> None:
     """Send HL7 v2.x message via Minimal Lower Layer Protocol (MLLP)."""
     from datetime import datetime as dt
+
     now = dt.utcnow().strftime("%Y%m%d%H%M%S")
     msg_id = req.pa_id.replace("-", "")[:20]
 
@@ -724,6 +857,16 @@ async def _send_hl7_mllp(req: HL7NotificationRequest) -> None:
         await writer.drain()
         ack = await asyncio.wait_for(reader.read(1024), timeout=10.0)
         writer.close()
-        log.info("hl7.sent", pa_id=req.pa_id, endpoint=req.hl7_endpoint, ack_received=bool(ack))
+        log.info(
+            "hl7.sent",
+            pa_id=req.pa_id,
+            endpoint=req.hl7_endpoint,
+            ack_received=bool(ack),
+        )
     except Exception as exc:
-        log.error("hl7.send_failed", pa_id=req.pa_id, endpoint=req.hl7_endpoint, error=str(exc))
+        log.error(
+            "hl7.send_failed",
+            pa_id=req.pa_id,
+            endpoint=req.hl7_endpoint,
+            error=str(exc),
+        )

@@ -3,6 +3,7 @@ AutoDecisionService — executes auto-approve / auto-deny when thresholds met.
 Payer integration handled separately in microservices; this module manages
 the decision state machine and auth number generation.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -13,8 +14,11 @@ import structlog
 
 from app.core.config import settings
 from app.schemas.pa_schemas import (
-    AIRecommendation, AutoDecisionResult, DecisionStatus,
-    PASubmissionRequest, RouteDecision,
+    AIRecommendation,
+    AutoDecisionResult,
+    DecisionStatus,
+    PASubmissionRequest,
+    RouteDecision,
 )
 
 log = structlog.get_logger(__name__)
@@ -22,7 +26,13 @@ log = structlog.get_logger(__name__)
 
 def _gen_auth_number(payer: str) -> str:
     """Generate authorization number in payer-standard format."""
-    prefix = {"UHC": "UHC", "AETNA": "AET", "BCBS": "BCB", "CIGNA": "CGN", "CVS": "CVS"}.get(payer, "AUTH")
+    prefix = {
+        "UHC": "UHC",
+        "AETNA": "AET",
+        "BCBS": "BCB",
+        "CIGNA": "CGN",
+        "CVS": "CVS",
+    }.get(payer, "AUTH")
     return f"{prefix}{datetime.now().strftime('%Y%m%d')}{uuid.uuid4().hex[:6].upper()}"
 
 
@@ -46,8 +56,12 @@ class AutoDecisionService:
 
         if route == RouteDecision.AUTO_APPROVE:
             auth_num = _gen_auth_number(payer)
-            log.info("auto_decision.approved",
-                     pa=submission.pa_number, confidence=confidence, auth=auth_num)
+            log.info(
+                "auto_decision.approved",
+                pa=submission.pa_number,
+                confidence=confidence,
+                auth=auth_num,
+            )
             return AutoDecisionResult(
                 pa_number=submission.pa_number or "",
                 decision=DecisionStatus.AUTO_APPROVED,
@@ -65,8 +79,11 @@ class AutoDecisionService:
 
         if route == RouteDecision.AUTO_DENY:
             # Auto-deny always requires MD co-sign — flag it
-            log.info("auto_decision.deny_pending_md",
-                     pa=submission.pa_number, confidence=confidence)
+            log.info(
+                "auto_decision.deny_pending_md",
+                pa=submission.pa_number,
+                confidence=confidence,
+            )
             return AutoDecisionResult(
                 pa_number=submission.pa_number or "",
                 decision=DecisionStatus.IN_REVIEW,  # Stays in review until MD signs
@@ -83,7 +100,11 @@ class AutoDecisionService:
             )
 
         if route == RouteDecision.ESCALATE:
-            log.info("auto_decision.escalated", pa=submission.pa_number, confidence=confidence)
+            log.info(
+                "auto_decision.escalated",
+                pa=submission.pa_number,
+                confidence=confidence,
+            )
             return AutoDecisionResult(
                 pa_number=submission.pa_number or "",
                 decision=DecisionStatus.IN_REVIEW,
@@ -99,8 +120,11 @@ class AutoDecisionService:
             )
 
         # HUMAN_REVIEW — no auto-decision, assign to queue
-        log.info("auto_decision.human_review_queued",
-                 pa=submission.pa_number, confidence=confidence)
+        log.info(
+            "auto_decision.human_review_queued",
+            pa=submission.pa_number,
+            confidence=confidence,
+        )
         return AutoDecisionResult(
             pa_number=submission.pa_number or "",
             decision=DecisionStatus.IN_REVIEW,
@@ -120,11 +144,12 @@ class AutoDecisionService:
     def compute_sla_deadline(submission: PASubmissionRequest) -> datetime:
         """Compute regulatory SLA deadline from urgency level."""
         from app.schemas.pa_schemas import UrgencyLevel
+
         now = datetime.now(timezone.utc)
         hours = {
             UrgencyLevel.EMERGENCY: 24,
-            UrgencyLevel.URGENT:    24,
+            UrgencyLevel.URGENT: 24,
             UrgencyLevel.EXPEDITED: 72,
-            UrgencyLevel.ROUTINE:   72,
+            UrgencyLevel.ROUTINE: 72,
         }.get(submission.urgency, 72)
         return now + timedelta(hours=hours)

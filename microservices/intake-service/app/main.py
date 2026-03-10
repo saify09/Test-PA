@@ -9,6 +9,7 @@ Responsibilities:
   - Generate PA tracking number
   - Auto-request missing info (FR-006)
 """
+
 from __future__ import annotations
 import re, json, asyncio
 from datetime import datetime, timezone, date
@@ -24,6 +25,7 @@ from pydantic_settings import BaseSettings
 
 log = structlog.get_logger(__name__)
 
+
 # ── Settings ──────────────────────────────────────────────────────────────────
 class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
@@ -34,9 +36,13 @@ class Settings(BaseSettings):
     AI_ENGINE_URL: str = "http://localhost:8001"
     SECRET_KEY: str = "dev-secret-change-in-production-min-32-chars"
     ENCRYPTION_KEY: str = "dev-enc-key-32bytes-change-prod!!"
-    class Config: env_file = ".env"
+
+    class Config:
+        env_file = ".env"
+
 
 settings = Settings()
+
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 class DiagnosisIn(BaseModel):
@@ -52,6 +58,7 @@ class DiagnosisIn(BaseModel):
             raise ValueError(f"Invalid ICD-10: {v}")
         return v
 
+
 class ProcedureIn(BaseModel):
     code: str
     description: Optional[str] = None
@@ -66,6 +73,7 @@ class ProcedureIn(BaseModel):
             raise ValueError(f"Invalid CPT/HCPCS: {v}")
         return v
 
+
 class MemberIn(BaseModel):
     member_id: str
     first_name: str
@@ -73,6 +81,7 @@ class MemberIn(BaseModel):
     date_of_birth: date
     gender: str = Field(..., pattern="^[MFU]$")
     payer: str  # UHC, AETNA, BCBS, CIGNA, CVS
+
 
 class ProviderIn(BaseModel):
     npi: str = Field(..., pattern=r"^\d{10}$")
@@ -82,18 +91,20 @@ class ProviderIn(BaseModel):
     phone: Optional[str] = None
     fax: Optional[str] = None
 
+
 class IntakeRequest(BaseModel):
     """Universal intake schema — all channels normalize to this."""
+
     # Source
     source_channel: str = "PORTAL"  # PORTAL | EHR | FAX | EDI | API
-    external_ref:   Optional[str] = None
+    external_ref: Optional[str] = None
 
     # Parties
-    member:   MemberIn
+    member: MemberIn
     provider: ProviderIn
 
     # Clinical
-    diagnoses:  List[DiagnosisIn] = Field(..., min_length=1)
+    diagnoses: List[DiagnosisIn] = Field(..., min_length=1)
     procedures: List[ProcedureIn] = Field(..., min_length=1)
     service_type: str
     place_of_service: str = "11"
@@ -105,14 +116,18 @@ class IntakeRequest(BaseModel):
     # Attachments
     document_ids: List[str] = []
 
+
 class EDI278Request(BaseModel):
     """Raw EDI X12 278 transaction — parsed and normalized to IntakeRequest."""
+
     isa_segment: str
     transaction_set: str
     raw_edi: str
 
+
 class FHIRClaimRequest(BaseModel):
     """Inbound FHIR R4 Claim resource."""
+
     resourceType: str = "Claim"
     id: Optional[str] = None
     status: str = "active"
@@ -122,6 +137,7 @@ class FHIRClaimRequest(BaseModel):
     insurance: List[Dict[str, Any]] = []
     item: List[Dict[str, Any]] = []
     diagnosis: List[Dict[str, Any]] = []
+
 
 class IntakeResponse(BaseModel):
     pa_number: str
@@ -133,13 +149,25 @@ class IntakeResponse(BaseModel):
     message: str
     ai_triggered: bool
 
+
 # ── Validation logic ──────────────────────────────────────────────────────────
 REQUIRED_FIELDS = {
-    "DIAGNOSTIC_IMAGING":   ["diagnoses", "procedures", "clinical_summary", "requested_start_date"],
-    "SURGICAL_PROCEDURE":   ["diagnoses", "procedures", "clinical_summary", "requested_start_date"],
+    "DIAGNOSTIC_IMAGING": [
+        "diagnoses",
+        "procedures",
+        "clinical_summary",
+        "requested_start_date",
+    ],
+    "SURGICAL_PROCEDURE": [
+        "diagnoses",
+        "procedures",
+        "clinical_summary",
+        "requested_start_date",
+    ],
     "SPECIALTY_MEDICATION": ["diagnoses", "procedures", "clinical_summary"],
-    "DEFAULT":              ["diagnoses", "procedures", "clinical_summary"],
+    "DEFAULT": ["diagnoses", "procedures", "clinical_summary"],
 }
+
 
 def validate_intake(req: IntakeRequest) -> List[str]:
     """Returns list of missing/invalid fields."""
@@ -154,6 +182,7 @@ def validate_intake(req: IntakeRequest) -> List[str]:
         issues.append("Invalid member ID")
     return issues
 
+
 def check_duplicate(pa_number: str, member_id: str, procedure_code: str) -> bool:
     """
     In production: query DB for existing active PA within last 90 days
@@ -161,20 +190,21 @@ def check_duplicate(pa_number: str, member_id: str, procedure_code: str) -> bool
     """
     return False  # Mock: no duplicates
 
+
 def normalize_fhir_to_intake(fhir: FHIRClaimRequest) -> IntakeRequest:
     """Map FHIR R4 Claim → IntakeRequest."""
     diagnoses = []
     for i, dx in enumerate(fhir.diagnosis):
         code_obj = dx.get("diagnosisCodeableConcept", {})
-        codings  = code_obj.get("coding", [{}])
-        code     = codings[0].get("code", "Z00") if codings else "Z00"
+        codings = code_obj.get("coding", [{}])
+        code = codings[0].get("code", "Z00") if codings else "Z00"
         diagnoses.append(DiagnosisIn(code=code, is_primary=(i == 0)))
 
     procedures = []
     for item in fhir.item:
         prod_serv = item.get("productOrService", {})
-        codings   = prod_serv.get("coding", [{}])
-        code      = codings[0].get("code", "99213") if codings else "99213"
+        codings = prod_serv.get("coding", [{}])
+        code = codings[0].get("code", "99213") if codings else "99213"
         procedures.append(ProcedureIn(code=code))
 
     patient_ref = fhir.patient.get("reference", "").replace("Patient/", "")
@@ -184,17 +214,23 @@ def normalize_fhir_to_intake(fhir: FHIRClaimRequest) -> IntakeRequest:
         source_channel="EHR",
         member=MemberIn(
             member_id=patient_ref or "FHIR_MEMBER",
-            first_name="FHIR", last_name="Patient",
-            date_of_birth=date(1980, 1, 1), gender="U", payer="UHC"
+            first_name="FHIR",
+            last_name="Patient",
+            date_of_birth=date(1980, 1, 1),
+            gender="U",
+            payer="UHC",
         ),
-        provider=ProviderIn(npi=provider_ref[:10].zfill(10) if provider_ref else "0000000000",
-                            name="FHIR Provider"),
+        provider=ProviderIn(
+            npi=provider_ref[:10].zfill(10) if provider_ref else "0000000000",
+            name="FHIR Provider",
+        ),
         diagnoses=diagnoses or [DiagnosisIn(code="Z00", is_primary=True)],
         procedures=procedures or [ProcedureIn(code="99213")],
         service_type="OTHER",
         requested_start_date=date.today(),
         clinical_summary=f"FHIR claim {fhir.id or 'unknown'} — normalized intake",
     )
+
 
 def parse_edi_278(edi: str) -> Dict[str, Any]:
     """
@@ -204,18 +240,24 @@ def parse_edi_278(edi: str) -> Dict[str, Any]:
     """
     segments = edi.strip().split("~")
     result: Dict[str, Any] = {
-        "member_id": None, "provider_npi": None,
-        "diagnoses": [], "procedures": [],
-        "service_type": "OTHER", "urgency": "ROUTINE",
+        "member_id": None,
+        "provider_npi": None,
+        "diagnoses": [],
+        "procedures": [],
+        "service_type": "OTHER",
+        "urgency": "ROUTINE",
     }
     for seg in segments:
         elements = seg.strip().split("*")
-        if not elements: continue
+        if not elements:
+            continue
         seg_id = elements[0]
 
         if seg_id == "NM1" and len(elements) > 9:
-            if elements[1] == "IL":      result["member_id"] = elements[9]
-            elif elements[1] == "82":    result["provider_npi"] = elements[9]
+            if elements[1] == "IL":
+                result["member_id"] = elements[9]
+            elif elements[1] == "82":
+                result["provider_npi"] = elements[9]
 
         elif seg_id == "HI" and len(elements) > 1:
             for e in elements[1:]:
@@ -229,16 +271,20 @@ def parse_edi_278(edi: str) -> Dict[str, Any]:
                 result["procedures"].append(svc[1])
 
         elif seg_id == "UM" and len(elements) > 2:
-            if elements[2] == "1":     result["urgency"] = "URGENT"
-            elif elements[2] == "2":   result["urgency"] = "EMERGENCY"
+            if elements[2] == "1":
+                result["urgency"] = "URGENT"
+            elif elements[2] == "2":
+                result["urgency"] = "EMERGENCY"
 
     return result
+
 
 # ── Kafka publisher ───────────────────────────────────────────────────────────
 async def publish_to_ai_queue(pa_number: str, payload: Dict[str, Any]):
     """Publish intake event to Kafka pa-submissions topic."""
     try:
         from aiokafka import AIOKafkaProducer
+
         producer = AIOKafkaProducer(
             bootstrap_servers=settings.KAFKA_SERVERS,
             value_serializer=lambda v: json.dumps(v, default=str).encode(),
@@ -252,11 +298,13 @@ async def publish_to_ai_queue(pa_number: str, payload: Dict[str, Any]):
     except Exception as e:
         log.warning("kafka.unavailable", error=str(e))
 
+
 # ── Dedup checker ─────────────────────────────────────────────────────────────
 async def check_dedup_async(member_id: str, procedure_code: str) -> Optional[str]:
     """Returns existing PA number if duplicate found, else None."""
     # Production: query PA DB with Redis cache
     return None
+
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 @asynccontextmanager
@@ -265,18 +313,23 @@ async def lifespan(app: FastAPI):
     yield
     log.info("intake_service.stopping")
 
+
 app = FastAPI(
     title="PA Intake Service",
     description="Multi-channel PA request intake, validation, and routing",
     version=settings.APP_VERSION,
     lifespan=lifespan,
 )
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
 app.add_middleware(GZipMiddleware, minimum_size=500)
+
 
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "intake", "version": settings.APP_VERSION}
+
 
 # ── POST /intake/submit ───────────────────────────────────────────────────────
 @app.post("/intake/submit", response_model=IntakeResponse, status_code=201)
@@ -287,7 +340,10 @@ async def submit(req: IntakeRequest, background_tasks: BackgroundTasks):
     FR-006: Auto-request missing info | FR-007: Generate PA number
     """
     import random, string
-    pa_number = f"PA-{datetime.now().year}-{''.join(random.choices(string.digits, k=6))}"
+
+    pa_number = (
+        f"PA-{datetime.now().year}-{''.join(random.choices(string.digits, k=6))}"
+    )
 
     # Dedup check (FR-005)
     proc_code = req.procedures[0].code if req.procedures else ""
@@ -299,8 +355,12 @@ async def submit(req: IntakeRequest, background_tasks: BackgroundTasks):
     missing = validate_intake(req)
 
     # SLA deadline
-    hours = {"EMERGENCY": 24, "URGENT": 24, "EXPEDITED": 72, "ROUTINE": 72}.get(req.urgency, 72)
-    deadline = datetime.now(timezone.utc).replace(microsecond=0) + __import__('datetime').timedelta(hours=hours)
+    hours = {"EMERGENCY": 24, "URGENT": 24, "EXPEDITED": 72, "ROUTINE": 72}.get(
+        req.urgency, 72
+    )
+    deadline = datetime.now(timezone.utc).replace(microsecond=0) + __import__(
+        "datetime"
+    ).timedelta(hours=hours)
     submitted_at = datetime.now(timezone.utc).replace(microsecond=0)
 
     # Publish to AI engine queue
@@ -319,8 +379,14 @@ async def submit(req: IntakeRequest, background_tasks: BackgroundTasks):
     }
     background_tasks.add_task(publish_to_ai_queue, pa_number, event_payload)
 
-    log.info("intake.accepted", pa=pa_number, channel=req.source_channel,
-             payer=req.member.payer, urgency=req.urgency, missing=len(missing))
+    log.info(
+        "intake.accepted",
+        pa=pa_number,
+        channel=req.source_channel,
+        payer=req.member.payer,
+        urgency=req.urgency,
+        missing=len(missing),
+    )
 
     return IntakeResponse(
         pa_number=pa_number,
@@ -337,6 +403,7 @@ async def submit(req: IntakeRequest, background_tasks: BackgroundTasks):
         ai_triggered=True,
     )
 
+
 # ── POST /intake/fhir ─────────────────────────────────────────────────────────
 @app.post("/intake/fhir", status_code=201)
 async def intake_fhir(claim: FHIRClaimRequest, background_tasks: BackgroundTasks):
@@ -344,22 +411,28 @@ async def intake_fhir(claim: FHIRClaimRequest, background_tasks: BackgroundTasks
     normalized = normalize_fhir_to_intake(claim)
     return await submit(normalized, background_tasks)
 
+
 # ── POST /intake/edi278 ───────────────────────────────────────────────────────
 @app.post("/intake/edi278", status_code=201)
 async def intake_edi(body: EDI278Request, background_tasks: BackgroundTasks):
     """Accept X12 EDI 278 transaction (FR-001)."""
     parsed = parse_edi_278(body.raw_edi)
     import random, string
-    dx_list = [DiagnosisIn(code=c, is_primary=(i == 0))
-               for i, c in enumerate(parsed.get("diagnoses", ["Z00"])[:5])]
+
+    dx_list = [
+        DiagnosisIn(code=c, is_primary=(i == 0))
+        for i, c in enumerate(parsed.get("diagnoses", ["Z00"])[:5])
+    ]
     proc_list = [ProcedureIn(code=c) for c in parsed.get("procedures", ["99213"])[:5]]
     req = IntakeRequest(
         source_channel="EDI",
         external_ref=body.transaction_set,
         member=MemberIn(
             member_id=parsed.get("member_id") or "EDI_MEMBER",
-            first_name="EDI", last_name="Member",
-            date_of_birth=date(1970, 1, 1), gender="U",
+            first_name="EDI",
+            last_name="Member",
+            date_of_birth=date(1970, 1, 1),
+            gender="U",
             payer="UHC",
         ),
         provider=ProviderIn(
@@ -375,6 +448,7 @@ async def intake_edi(body: EDI278Request, background_tasks: BackgroundTasks):
     )
     return await submit(req, background_tasks)
 
+
 # ── GET /intake/{pa_number}/status ────────────────────────────────────────────
 @app.get("/intake/{pa_number}/status")
 async def get_status(pa_number: str):
@@ -385,6 +459,7 @@ async def get_status(pa_number: str):
         "ai_queued": True,
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
+
 
 # ── POST /intake/validate ──────────────────────────────────────────────────────
 @app.post("/intake/validate")

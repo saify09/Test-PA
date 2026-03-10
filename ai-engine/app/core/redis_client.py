@@ -1,4 +1,5 @@
 """Redis async client with connection pool."""
+
 import redis.asyncio as redis
 import structlog
 from app.core.config import settings

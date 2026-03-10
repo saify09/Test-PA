@@ -3,6 +3,7 @@ PA AI Engine — FastAPI Application
 Provides clinical criteria matching, document processing, confidence scoring,
 and auto-decision logic for the Prior Authorization system.
 """
+
 import time
 import structlog
 from contextlib import asynccontextmanager
@@ -24,12 +25,15 @@ log = structlog.get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
-    log.info("ai_engine.starting", version=settings.APP_VERSION, env=settings.ENVIRONMENT)
+    log.info(
+        "ai_engine.starting", version=settings.APP_VERSION, env=settings.ENVIRONMENT
+    )
     await init_db()
     await init_redis()
     # Warm up ML models on startup
     from app.services.criteria_engine import CriteriaEngine
     from app.services.nlp_extractor import NLPExtractor
+
     await CriteriaEngine.warmup()
     await NLPExtractor.warmup()
     log.info("ai_engine.ready")
@@ -71,6 +75,7 @@ async def request_timing(request: Request, call_next):
 @app.middleware("http")
 async def correlation_id(request: Request, call_next):
     import uuid
+
     cid = request.headers.get("X-Correlation-ID", str(uuid.uuid4()))
     structlog.contextvars.bind_contextvars(correlation_id=cid)
     response = await call_next(request)
@@ -88,23 +93,33 @@ app.include_router(graphql_router)  # TR-003: GraphQL at /graphql with GraphiQL 
 
 @app.get("/health", tags=["Health"])
 async def health():
-    return {"status": "healthy", "version": settings.APP_VERSION, "service": "ai-engine"}
+    return {
+        "status": "healthy",
+        "version": settings.APP_VERSION,
+        "service": "ai-engine",
+    }
 
 
 @app.get("/health/ready", tags=["Health"])
 async def readiness():
     from app.core.database import check_db
     from app.core.redis_client import check_redis
+
     db_ok = await check_db()
     redis_ok = await check_redis()
     status = "ready" if db_ok and redis_ok else "not_ready"
     return {
         "status": status,
-        "checks": {"database": "ok" if db_ok else "fail", "redis": "ok" if redis_ok else "fail"},
+        "checks": {
+            "database": "ok" if db_ok else "fail",
+            "redis": "ok" if redis_ok else "fail",
+        },
     }
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    log.error("unhandled_exception", path=request.url.path, error=str(exc), exc_info=True)
+    log.error(
+        "unhandled_exception", path=request.url.path, error=str(exc), exc_info=True
+    )
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})

@@ -6,6 +6,7 @@ Utility services:
   - Audit logger
   - Kafka event publisher
 """
+
 from __future__ import annotations
 
 import json
@@ -50,12 +51,16 @@ class FHIRMapper:
         member_fhir_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         outcome_map = {
-            "APPROVED": "complete", "AUTO_APPROVED": "complete",
-            "DENIED": "complete", "AUTO_DENIED": "complete",
-            "PENDED": "queued", "IN_REVIEW": "queued",
+            "APPROVED": "complete",
+            "AUTO_APPROVED": "complete",
+            "DENIED": "complete",
+            "AUTO_DENIED": "complete",
+            "PENDED": "queued",
+            "IN_REVIEW": "queued",
         }
         disposition_map = {
-            "APPROVED": "Approved", "AUTO_APPROVED": "Approved",
+            "APPROVED": "Approved",
+            "AUTO_APPROVED": "Approved",
             "DENIED": "Denied — see determination letter for details",
             "AUTO_DENIED": "Denied — see determination letter for details",
             "PENDED": "Pending additional information",
@@ -67,10 +72,19 @@ class FHIRMapper:
             "meta": {
                 "versionId": "1",
                 "lastUpdated": datetime.now(timezone.utc).isoformat(),
-                "profile": ["http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-claimresponse"]
+                "profile": [
+                    "http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-claimresponse"
+                ],
             },
             "status": "active",
-            "type": {"coding": [{"system": "http://terminology.hl7.org/CodeSystem/claim-type", "code": "professional"}]},
+            "type": {
+                "coding": [
+                    {
+                        "system": "http://terminology.hl7.org/CodeSystem/claim-type",
+                        "code": "professional",
+                    }
+                ]
+            },
             "use": "preauthorization",
             "created": datetime.now(timezone.utc).isoformat(),
             "outcome": outcome_map.get(decision, "queued"),
@@ -94,10 +108,19 @@ class FHIRMapper:
             "resourceType": "Claim",
             "id": submission_dict.get("pa_number", ""),
             "status": "active",
-            "type": {"coding": [{"system": "http://terminology.hl7.org/CodeSystem/claim-type", "code": "professional"}]},
+            "type": {
+                "coding": [
+                    {
+                        "system": "http://terminology.hl7.org/CodeSystem/claim-type",
+                        "code": "professional",
+                    }
+                ]
+            },
             "use": "preauthorization",
             "created": datetime.now(timezone.utc).isoformat(),
-            "priority": {"coding": [{"code": submission_dict.get("urgency", "normal").lower()}]},
+            "priority": {
+                "coding": [{"code": submission_dict.get("urgency", "normal").lower()}]
+            },
         }
 
 
@@ -117,7 +140,9 @@ class EligibilityChecker:
         provider_npi: Optional[str] = None,
     ) -> Dict[str, Any]:
         try:
-            result = await cls._call_payer_api(member_id, payer, service_date, provider_npi)
+            result = await cls._call_payer_api(
+                member_id, payer, service_date, provider_npi
+            )
             return result
         except Exception as e:
             log.warning("eligibility.api_error", payer=payer, error=str(e))
@@ -129,11 +154,16 @@ class EligibilityChecker:
         member_id: str, payer: str, service_date: date, provider_npi: Optional[str]
     ) -> Dict[str, Any]:
         import httpx
+
         api_configs = {
-            "UHC":   {"url": f"{settings.UHC_API_BASE}/eligibility/verify",
-                      "auth": ("Bearer", settings.UHC_CLIENT_SECRET)},
-            "AETNA": {"url": f"{settings.AETNA_API_BASE}/eligibility",
-                      "auth": ("Bearer", settings.AETNA_CLIENT_SECRET)},
+            "UHC": {
+                "url": f"{settings.UHC_API_BASE}/eligibility/verify",
+                "auth": ("Bearer", settings.UHC_CLIENT_SECRET),
+            },
+            "AETNA": {
+                "url": f"{settings.AETNA_API_BASE}/eligibility",
+                "auth": ("Bearer", settings.AETNA_CLIENT_SECRET),
+            },
         }
         cfg = api_configs.get(payer)
         if not cfg or not cfg["auth"][1]:
@@ -147,7 +177,7 @@ class EligibilityChecker:
             resp = await client.post(
                 cfg["url"],
                 json=payload,
-                headers={"Authorization": f"{cfg['auth'][0]} {cfg['auth'][1]}"}
+                headers={"Authorization": f"{cfg['auth'][0]} {cfg['auth'][1]}"},
             )
             resp.raise_for_status()
             return resp.json()
@@ -174,6 +204,7 @@ class EventPublisher:
     Publishes domain events to Kafka topics (TR-004 event-driven architecture).
     Falls back to no-op if Kafka unavailable.
     """
+
     _producer = None
 
     @classmethod
@@ -184,6 +215,7 @@ class EventPublisher:
         try:
             if not cls._producer:
                 from aiokafka import AIOKafkaProducer
+
                 cls._producer = AIOKafkaProducer(
                     bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
                     value_serializer=lambda v: json.dumps(v).encode(),
@@ -200,9 +232,14 @@ class EventPublisher:
         await cls.publish(settings.KAFKA_TOPIC_SUBMISSIONS, pa_number, payload)
 
     @classmethod
-    async def publish_decision(cls, pa_number: str, decision: str, payload: Dict[str, Any]):
-        await cls.publish(settings.KAFKA_TOPIC_DECISIONS, pa_number,
-                          {"pa_number": pa_number, "decision": decision, **payload})
+    async def publish_decision(
+        cls, pa_number: str, decision: str, payload: Dict[str, Any]
+    ):
+        await cls.publish(
+            settings.KAFKA_TOPIC_DECISIONS,
+            pa_number,
+            {"pa_number": pa_number, "decision": decision, **payload},
+        )
 
 
 # ── Audit Logger ──────────────────────────────────────────────────────────────
@@ -225,11 +262,18 @@ class AuditLogger:
         db_session=None,
     ):
         from app.models.pa_models import AuditLog
+
         entry = {
-            "action": action, "resource": resource, "resource_id": resource_id,
-            "user_id": user_id, "user_name": user_name, "user_role": user_role,
-            "details": details, "ip_address": ip_address,
-            "phi_accessed": phi_accessed, "phi_fields": phi_fields,
+            "action": action,
+            "resource": resource,
+            "resource_id": resource_id,
+            "user_id": user_id,
+            "user_name": user_name,
+            "user_role": user_role,
+            "details": details,
+            "ip_address": ip_address,
+            "phi_accessed": phi_accessed,
+            "phi_fields": phi_fields,
             "result": result,
         }
         log.info("audit", **{k: v for k, v in entry.items() if v is not None})

@@ -32,16 +32,16 @@ logger = logging.getLogger(__name__)
 
 class GuidelinesLoader:
     """Load clinical guidelines from various sources"""
-    
+
     def __init__(
         self,
         mcg_api_key: Optional[str] = None,
         interqual_api_key: Optional[str] = None,
-        guidelines_dir: str = "/data/guidelines"
+        guidelines_dir: str = "/data/guidelines",
     ):
         """
         Initialize guidelines loader
-        
+
         Args:
             mcg_api_key: API key for MCG Care Guidelines
             interqual_api_key: API key for InterQual
@@ -51,146 +51,146 @@ class GuidelinesLoader:
         self.interqual_api_key = interqual_api_key
         self.guidelines_dir = Path(guidelines_dir)
         self.guidelines_dir.mkdir(parents=True, exist_ok=True)
-    
+
     def load_from_mcg_api(self) -> List[ClinicalGuideline]:
         """
         Load guidelines from MCG Care Guidelines API
-        
+
         API Documentation: https://www.mcg.com/api-docs
-        
+
         Returns:
             List of clinical guidelines
         """
         if not self.mcg_api_key:
             logger.warning("MCG API key not provided. Skipping MCG guidelines.")
             return []
-        
+
         logger.info("Loading guidelines from MCG API...")
-        
+
         # MCG API endpoint (example - actual endpoint from MCG documentation)
         base_url = "https://api.mcg.com/v1/guidelines"
         headers = {
             "Authorization": f"Bearer {self.mcg_api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
-        
+
         guidelines = []
-        
+
         try:
             # Fetch imaging guidelines
-            response = requests.get(
-                f"{base_url}/imaging",
-                headers=headers,
-                timeout=30
-            )
+            response = requests.get(f"{base_url}/imaging", headers=headers, timeout=30)
             response.raise_for_status()
-            
+
             data = response.json()
-            
-            for item in data.get('guidelines', []):
+
+            for item in data.get("guidelines", []):
                 guideline = self._parse_mcg_guideline(item)
                 if guideline:
                     guidelines.append(guideline)
-            
+
             logger.info(f"Loaded {len(guidelines)} MCG guidelines")
-            
+
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to load MCG guidelines: {e}")
-        
+
         return guidelines
-    
+
     def _parse_mcg_guideline(self, data: Dict) -> Optional[ClinicalGuideline]:
         """Parse MCG API response into ClinicalGuideline"""
         try:
             return ClinicalGuideline(
-                guideline_id=data.get('id', ''),
-                source='MCG',
-                category=data.get('category', 'General'),
-                procedure_codes=data.get('cpt_codes', []),
-                diagnosis_codes=data.get('icd10_codes', []),
-                title=data.get('title', ''),
-                criteria_text=data.get('criteria', ''),
-                indications=data.get('indications', []),
-                contraindications=data.get('contraindications', []),
-                documentation_requirements=data.get('documentation_required', []),
-                references=[data.get('source', 'MCG Care Guidelines')],
-                effective_date=data.get('effective_date', datetime.now().isoformat()[:10])
+                guideline_id=data.get("id", ""),
+                source="MCG",
+                category=data.get("category", "General"),
+                procedure_codes=data.get("cpt_codes", []),
+                diagnosis_codes=data.get("icd10_codes", []),
+                title=data.get("title", ""),
+                criteria_text=data.get("criteria", ""),
+                indications=data.get("indications", []),
+                contraindications=data.get("contraindications", []),
+                documentation_requirements=data.get("documentation_required", []),
+                references=[data.get("source", "MCG Care Guidelines")],
+                effective_date=data.get(
+                    "effective_date", datetime.now().isoformat()[:10]
+                ),
             )
         except Exception as e:
             logger.error(f"Error parsing MCG guideline: {e}")
             return None
-    
+
     def load_from_interqual_api(self) -> List[ClinicalGuideline]:
         """
         Load guidelines from InterQual API
-        
+
         API Documentation: https://www.changehealthcare.com/interqual
-        
+
         Returns:
             List of clinical guidelines
         """
         if not self.interqual_api_key:
-            logger.warning("InterQual API key not provided. Skipping InterQual guidelines.")
+            logger.warning(
+                "InterQual API key not provided. Skipping InterQual guidelines."
+            )
             return []
-        
+
         logger.info("Loading guidelines from InterQual API...")
-        
+
         # InterQual API endpoint (example - actual endpoint from InterQual docs)
         base_url = "https://api.interqual.com/v1/criteria"
         headers = {
             "X-API-Key": self.interqual_api_key,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
-        
+
         guidelines = []
-        
+
         try:
             response = requests.get(
-                f"{base_url}/inpatient",
-                headers=headers,
-                timeout=30
+                f"{base_url}/inpatient", headers=headers, timeout=30
             )
             response.raise_for_status()
-            
+
             data = response.json()
-            
-            for item in data.get('criteria', []):
+
+            for item in data.get("criteria", []):
                 guideline = self._parse_interqual_guideline(item)
                 if guideline:
                     guidelines.append(guideline)
-            
+
             logger.info(f"Loaded {len(guidelines)} InterQual guidelines")
-            
+
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to load InterQual guidelines: {e}")
-        
+
         return guidelines
-    
+
     def _parse_interqual_guideline(self, data: Dict) -> Optional[ClinicalGuideline]:
         """Parse InterQual API response into ClinicalGuideline"""
         try:
             return ClinicalGuideline(
-                guideline_id=data.get('criteria_id', ''),
-                source='InterQual',
-                category=data.get('level_of_care', 'General'),
-                procedure_codes=data.get('procedure_codes', []),
-                diagnosis_codes=data.get('diagnosis_codes', []),
-                title=data.get('criteria_name', ''),
-                criteria_text=data.get('criteria_text', ''),
-                indications=data.get('admission_criteria', []),
-                contraindications=data.get('exclusions', []),
-                documentation_requirements=data.get('required_documentation', []),
-                references=[data.get('reference', 'InterQual Criteria')],
-                effective_date=data.get('effective_date', datetime.now().isoformat()[:10])
+                guideline_id=data.get("criteria_id", ""),
+                source="InterQual",
+                category=data.get("level_of_care", "General"),
+                procedure_codes=data.get("procedure_codes", []),
+                diagnosis_codes=data.get("diagnosis_codes", []),
+                title=data.get("criteria_name", ""),
+                criteria_text=data.get("criteria_text", ""),
+                indications=data.get("admission_criteria", []),
+                contraindications=data.get("exclusions", []),
+                documentation_requirements=data.get("required_documentation", []),
+                references=[data.get("reference", "InterQual Criteria")],
+                effective_date=data.get(
+                    "effective_date", datetime.now().isoformat()[:10]
+                ),
             )
         except Exception as e:
             logger.error(f"Error parsing InterQual guideline: {e}")
             return None
-    
+
     def load_from_json(self, filepath: str) -> List[ClinicalGuideline]:
         """
         Load guidelines from JSON file
-        
+
         JSON format:
         [
             {
@@ -202,109 +202,127 @@ class GuidelinesLoader:
         ]
         """
         logger.info(f"Loading guidelines from JSON: {filepath}")
-        
+
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, "r") as f:
                 data = json.load(f)
-            
+
             guidelines = [ClinicalGuideline(**item) for item in data]
             logger.info(f"Loaded {len(guidelines)} guidelines from JSON")
             return guidelines
-            
+
         except Exception as e:
             logger.error(f"Failed to load JSON guidelines: {e}")
             return []
-    
+
     def load_from_csv(self, filepath: str) -> List[ClinicalGuideline]:
         """
         Load guidelines from CSV file
-        
+
         CSV columns: guideline_id,source,category,procedure_codes,diagnosis_codes,
                      title,criteria_text,indications,contraindications,
                      documentation_requirements,references,effective_date
         """
         logger.info(f"Loading guidelines from CSV: {filepath}")
-        
+
         guidelines = []
-        
+
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, "r") as f:
                 reader = csv.DictReader(f)
-                
+
                 for row in reader:
                     # Parse list fields
-                    procedure_codes = row['procedure_codes'].split('|') if row['procedure_codes'] else []
-                    diagnosis_codes = row['diagnosis_codes'].split('|') if row['diagnosis_codes'] else []
-                    indications = row['indications'].split('|') if row['indications'] else []
-                    contraindications = row['contraindications'].split('|') if row['contraindications'] else []
-                    documentation_requirements = row['documentation_requirements'].split('|') if row['documentation_requirements'] else []
-                    references = row['references'].split('|') if row['references'] else []
-                    
+                    procedure_codes = (
+                        row["procedure_codes"].split("|")
+                        if row["procedure_codes"]
+                        else []
+                    )
+                    diagnosis_codes = (
+                        row["diagnosis_codes"].split("|")
+                        if row["diagnosis_codes"]
+                        else []
+                    )
+                    indications = (
+                        row["indications"].split("|") if row["indications"] else []
+                    )
+                    contraindications = (
+                        row["contraindications"].split("|")
+                        if row["contraindications"]
+                        else []
+                    )
+                    documentation_requirements = (
+                        row["documentation_requirements"].split("|")
+                        if row["documentation_requirements"]
+                        else []
+                    )
+                    references = (
+                        row["references"].split("|") if row["references"] else []
+                    )
+
                     guideline = ClinicalGuideline(
-                        guideline_id=row['guideline_id'],
-                        source=row['source'],
-                        category=row['category'],
+                        guideline_id=row["guideline_id"],
+                        source=row["source"],
+                        category=row["category"],
                         procedure_codes=procedure_codes,
                         diagnosis_codes=diagnosis_codes,
-                        title=row['title'],
-                        criteria_text=row['criteria_text'],
+                        title=row["title"],
+                        criteria_text=row["criteria_text"],
                         indications=indications,
                         contraindications=contraindications,
                         documentation_requirements=documentation_requirements,
                         references=references,
-                        effective_date=row['effective_date']
+                        effective_date=row["effective_date"],
                     )
                     guidelines.append(guideline)
-            
+
             logger.info(f"Loaded {len(guidelines)} guidelines from CSV")
             return guidelines
-            
+
         except Exception as e:
             logger.error(f"Failed to load CSV guidelines: {e}")
             return []
-    
+
     def load_all_guidelines(
-        self,
-        use_api: bool = True,
-        use_local: bool = True
+        self, use_api: bool = True, use_local: bool = True
     ) -> List[ClinicalGuideline]:
         """
         Load guidelines from all available sources
-        
+
         Args:
             use_api: Load from MCG/InterQual APIs
             use_local: Load from local files
-        
+
         Returns:
             Combined list of all guidelines
         """
         all_guidelines = []
-        
+
         # Load from APIs
         if use_api:
             all_guidelines.extend(self.load_from_mcg_api())
             all_guidelines.extend(self.load_from_interqual_api())
-        
+
         # Load from local files
         if use_local:
             # Check for JSON files
             for json_file in self.guidelines_dir.glob("*.json"):
                 all_guidelines.extend(self.load_from_json(str(json_file)))
-            
+
             # Check for CSV files
             for csv_file in self.guidelines_dir.glob("*.csv"):
                 all_guidelines.extend(self.load_from_csv(str(csv_file)))
-        
+
         logger.info(f"Total guidelines loaded: {len(all_guidelines)}")
         return all_guidelines
-    
+
     def create_sample_guidelines(self) -> List[ClinicalGuideline]:
         """
         Create sample guidelines for testing
         These represent real MCG/InterQual guideline structure
         """
         logger.info("Creating sample guidelines for testing...")
-        
+
         guidelines = [
             # Imaging Guidelines
             ClinicalGuideline(
@@ -338,13 +356,13 @@ class GuidelinesLoader:
                     "Neurological deficits (motor weakness, sensory loss, reflex changes)",
                     "Progressive symptoms despite treatment",
                     "Surgical planning for herniated disc or spinal stenosis",
-                    "Red flag symptoms (bowel/bladder dysfunction, saddle anesthesia)"
+                    "Red flag symptoms (bowel/bladder dysfunction, saddle anesthesia)",
                 ],
                 contraindications=[
                     "Acute low back pain < 6 weeks without radiculopathy",
                     "No prior conservative treatment attempted",
                     "No neurological findings on examination",
-                    "Isolated back pain without leg symptoms"
+                    "Isolated back pain without leg symptoms",
                 ],
                 documentation_requirements=[
                     "Duration and character of symptoms (back pain + leg pain)",
@@ -352,12 +370,11 @@ class GuidelinesLoader:
                     "Physical examination findings (neurological assessment)",
                     "Functional impact on daily activities",
                     "Response to prior treatments",
-                    "Presence or absence of red flag symptoms"
+                    "Presence or absence of red flag symptoms",
                 ],
                 references=["MCG Care Guidelines 27th Edition - Lumbar Spine Imaging"],
-                effective_date="2025-01-01"
+                effective_date="2025-01-01",
             ),
-            
             # Surgery Guidelines
             ClinicalGuideline(
                 guideline_id="MCG-SUR-002",
@@ -397,14 +414,14 @@ class GuidelinesLoader:
                     "Persistent pain despite 3+ months conservative treatment",
                     "Significant functional limitation affecting daily activities",
                     "Failed intra-articular injections",
-                    "Patient is appropriate surgical candidate"
+                    "Patient is appropriate surgical candidate",
                 ],
                 contraindications=[
                     "Active knee infection",
                     "Inadequate trial of conservative treatment (< 3 months)",
                     "Mild osteoarthritis (KL Grade 1-2)",
                     "Medical comorbidities making surgery high risk",
-                    "Unrealistic patient expectations"
+                    "Unrealistic patient expectations",
                 ],
                 documentation_requirements=[
                     "X-ray reports confirming osteoarthritis severity (KL grade)",
@@ -412,12 +429,13 @@ class GuidelinesLoader:
                     "Physical therapy notes and outcomes",
                     "Functional assessment (WOMAC, Oxford Knee Score, etc.)",
                     "Pain level documentation (VAS scale)",
-                    "Medical clearance if comorbidities present"
+                    "Medical clearance if comorbidities present",
                 ],
-                references=["MCG Care Guidelines 27th Edition - Total Knee Arthroplasty"],
-                effective_date="2025-01-01"
+                references=[
+                    "MCG Care Guidelines 27th Edition - Total Knee Arthroplasty"
+                ],
+                effective_date="2025-01-01",
             ),
-            
             # Medication Guidelines
             ClinicalGuideline(
                 guideline_id="IQ-MED-003",
@@ -453,14 +471,14 @@ class GuidelinesLoader:
                     "Failed or intolerant to first-line DMTs for 6+ months",
                     "Rapidly evolving disease with multiple relapses",
                     "MRI showing new or enhancing lesions",
-                    "EDSS score demonstrating disability progression"
+                    "EDSS score demonstrating disability progression",
                 ],
                 contraindications=[
                     "Progressive multifocal leukoencephalopathy (PML) history",
                     "High JC virus antibody index (> 1.5)",
                     "Immunocompromised state",
                     "Inadequate trial of first-line therapies (< 6 months)",
-                    "Progressive MS without relapses"
+                    "Progressive MS without relapses",
                 ],
                 documentation_requirements=[
                     "Neurologist evaluation and MS diagnosis confirmation",
@@ -469,19 +487,21 @@ class GuidelinesLoader:
                     "Documentation of relapses (dates, symptoms, treatments)",
                     "JC virus antibody test results",
                     "EDSS (Expanded Disability Status Scale) score",
-                    "TOUCH program enrollment confirmation"
+                    "TOUCH program enrollment confirmation",
                 ],
-                references=["InterQual 2025 Criteria - Specialty Pharmacy: Natalizumab"],
-                effective_date="2025-01-01"
-            )
+                references=[
+                    "InterQual 2025 Criteria - Specialty Pharmacy: Natalizumab"
+                ],
+                effective_date="2025-01-01",
+            ),
         ]
-        
+
         return guidelines
-    
+
     def save_sample_guidelines_to_json(self, filepath: str):
         """Save sample guidelines to JSON file"""
         guidelines = self.create_sample_guidelines()
-        
+
         guidelines_dict = [
             {
                 "guideline_id": g.guideline_id,
@@ -495,45 +515,42 @@ class GuidelinesLoader:
                 "contraindications": g.contraindications,
                 "documentation_requirements": g.documentation_requirements,
                 "references": g.references,
-                "effective_date": g.effective_date
+                "effective_date": g.effective_date,
             }
             for g in guidelines
         ]
-        
-        with open(filepath, 'w') as f:
+
+        with open(filepath, "w") as f:
             json.dump(guidelines_dict, f, indent=2)
-        
+
         logger.info(f"Saved {len(guidelines)} sample guidelines to {filepath}")
 
 
 if __name__ == "__main__":
     # Demo usage
-    loader = GuidelinesLoader(
-        guidelines_dir="/data/guidelines"
-    )
-    
+    loader = GuidelinesLoader(guidelines_dir="/data/guidelines")
+
     # Create and save sample guidelines
     sample_file = "/data/guidelines/sample_guidelines.json"
     loader.save_sample_guidelines_to_json(sample_file)
-    
+
     # Load guidelines
     guidelines = loader.load_all_guidelines(use_api=False, use_local=True)
-    
+
     print(f"\nLoaded {len(guidelines)} guidelines")
     for g in guidelines:
         print(f"\n{g.source} - {g.title}")
         print(f"  Procedures: {', '.join(g.procedure_codes[:3])}")
         print(f"  Diagnoses: {', '.join(g.diagnosis_codes[:3])}")
         print(f"  Indications: {len(g.indications)}")
-    
+
     # Build RAG index
     print("\nBuilding RAG index...")
     from rag_engine import ClinicalCriteriaRAG
-    
+
     rag = ClinicalCriteriaRAG(
-        guidelines_path="/data/guidelines",
-        index_path="/data/faiss_index"
+        guidelines_path="/data/guidelines", index_path="/data/faiss_index"
     )
     rag.build_index(guidelines)
-    
+
     print("✓ Guidelines loaded and indexed successfully!")

@@ -10,6 +10,7 @@ Covers:
   - INT-202: Claims system sync
   - TR-207: Master data management (providers, facilities, payers)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,7 +23,15 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    UploadFile,
+    File,
+)
 from pydantic import BaseModel, HttpUrl, validator
 
 from app.api.deps import get_current_user
@@ -36,15 +45,16 @@ router = APIRouter()
 # TR-107: CONTINUOUS LEARNING — Human Feedback & Retraining Pipeline
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class FeedbackPayload(BaseModel):
     pa_id: str
-    reviewer_decision: str           # APPROVED | DENIED | PENDED
-    ai_recommendation: str           # what the AI originally recommended
-    agreement: bool                  # did reviewer agree with AI?
-    override_reason: Optional[str]   # if disagreement, why?
+    reviewer_decision: str  # APPROVED | DENIED | PENDED
+    ai_recommendation: str  # what the AI originally recommended
+    agreement: bool  # did reviewer agree with AI?
+    override_reason: Optional[str]  # if disagreement, why?
     reviewer_id: str
-    reviewer_role: str               # RN_REVIEWER | MD_REVIEWER | MEDICAL_DIRECTOR
-    case_type: Optional[str]         # service category for stratified analysis
+    reviewer_role: str  # RN_REVIEWER | MD_REVIEWER | MEDICAL_DIRECTOR
+    case_type: Optional[str]  # service category for stratified analysis
     confidence_score: Optional[float]
 
 
@@ -98,7 +108,11 @@ async def submit_human_feedback(
         background.add_task(_trigger_retrain_pipeline, disagreement_count)
 
     log.info("ml.feedback.recorded", pa_id=payload.pa_id, agreement=payload.agreement)
-    return {"status": "recorded", "feedback_id": str(uuid4()), "triggers_retrain": (disagreement_count - last_trigger) >= RETRAIN_THRESHOLD}
+    return {
+        "status": "recorded",
+        "feedback_id": str(uuid4()),
+        "triggers_retrain": (disagreement_count - last_trigger) >= RETRAIN_THRESHOLD,
+    }
 
 
 @router.get("/ml/feedback/summary", tags=["ML Ops"])
@@ -118,7 +132,8 @@ async def get_feedback_summary(
         disagreements_by_reason={k: int(v) for k, v in reasons_raw.items()},
         disagreements_by_case_type={k: int(v) for k, v in types_raw.items()},
         last_retrain_triggered=await redis.get("ai_last_retrain_date"),
-        pending_for_retrain=disagreements - int(await redis.get("ai_last_retrain_trigger") or 0),
+        pending_for_retrain=disagreements
+        - int(await redis.get("ai_last_retrain_trigger") or 0),
         retrain_threshold=500,
     )
 
@@ -136,11 +151,22 @@ async def trigger_retrain(
 
     job_id = str(uuid4())
     background.add_task(_trigger_retrain_pipeline, 0, reason, job_id)
-    log.info("ml.retrain.triggered", reason=reason, triggered_by=current_user.get("id"), job_id=job_id)
-    return {"job_id": job_id, "status": "queued", "message": f"Retraining pipeline queued. Replacing {model_version_to_replace}."}
+    log.info(
+        "ml.retrain.triggered",
+        reason=reason,
+        triggered_by=current_user.get("id"),
+        job_id=job_id,
+    )
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "message": f"Retraining pipeline queued. Replacing {model_version_to_replace}.",
+    }
 
 
-async def _trigger_retrain_pipeline(disagreement_count: int, reason: str = "auto", job_id: str = "") -> None:
+async def _trigger_retrain_pipeline(
+    disagreement_count: int, reason: str = "auto", job_id: str = ""
+) -> None:
     """Background task: publish retrain job to Kafka topic."""
     redis = await get_redis()
     await redis.set("ai_last_retrain_trigger", disagreement_count)
@@ -154,6 +180,7 @@ async def _trigger_retrain_pipeline(disagreement_count: int, reason: str = "auto
 # TR-106: MODEL VERSIONING & A/B TESTING
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class ModelVersion(BaseModel):
     version: str
     accuracy: float
@@ -163,34 +190,65 @@ class ModelVersion(BaseModel):
     training_cases: int
     deployed_at: str
     is_active: bool
-    ab_traffic_pct: float = 0.0   # 0-100: % of traffic routed to this version
+    ab_traffic_pct: float = 0.0  # 0-100: % of traffic routed to this version
     drift_score: Optional[float]
     fairness_score: Optional[float]
 
 
 @router.get("/ml/models", tags=["ML Ops"])
-async def list_model_versions(current_user: dict = Depends(get_current_user)) -> List[ModelVersion]:
+async def list_model_versions(
+    current_user: dict = Depends(get_current_user),
+) -> List[ModelVersion]:
     """TR-106: List all deployed model versions with performance metrics."""
     return [
-        ModelVersion(version="v2.4.1", accuracy=0.938, auc_roc=0.971,
-                     auto_approval_threshold=0.92, auto_denial_threshold=0.15,
-                     training_cases=250000, deployed_at="2026-02-15T00:00:00Z",
-                     is_active=True, ab_traffic_pct=100.0, drift_score=0.02, fairness_score=0.97),
-        ModelVersion(version="v2.3.0", accuracy=0.924, auc_roc=0.958,
-                     auto_approval_threshold=0.91, auto_denial_threshold=0.14,
-                     training_cases=180000, deployed_at="2025-11-01T00:00:00Z",
-                     is_active=False, ab_traffic_pct=0.0, drift_score=0.08, fairness_score=0.95),
-        ModelVersion(version="v2.5.0-canary", accuracy=0.944, auc_roc=0.976,
-                     auto_approval_threshold=0.92, auto_denial_threshold=0.15,
-                     training_cases=310000, deployed_at="2026-03-01T00:00:00Z",
-                     is_active=True, ab_traffic_pct=10.0, drift_score=0.01, fairness_score=0.98),
+        ModelVersion(
+            version="v2.4.1",
+            accuracy=0.938,
+            auc_roc=0.971,
+            auto_approval_threshold=0.92,
+            auto_denial_threshold=0.15,
+            training_cases=250000,
+            deployed_at="2026-02-15T00:00:00Z",
+            is_active=True,
+            ab_traffic_pct=100.0,
+            drift_score=0.02,
+            fairness_score=0.97,
+        ),
+        ModelVersion(
+            version="v2.3.0",
+            accuracy=0.924,
+            auc_roc=0.958,
+            auto_approval_threshold=0.91,
+            auto_denial_threshold=0.14,
+            training_cases=180000,
+            deployed_at="2025-11-01T00:00:00Z",
+            is_active=False,
+            ab_traffic_pct=0.0,
+            drift_score=0.08,
+            fairness_score=0.95,
+        ),
+        ModelVersion(
+            version="v2.5.0-canary",
+            accuracy=0.944,
+            auc_roc=0.976,
+            auto_approval_threshold=0.92,
+            auto_denial_threshold=0.15,
+            training_cases=310000,
+            deployed_at="2026-03-01T00:00:00Z",
+            is_active=True,
+            ab_traffic_pct=10.0,
+            drift_score=0.01,
+            fairness_score=0.98,
+        ),
     ]
 
 
 @router.post("/ml/models/{version}/ab-test", tags=["ML Ops"])
 async def configure_ab_test(
     version: str,
-    traffic_pct: float = Query(..., ge=0, le=100, description="Percentage of traffic to route (0-100)"),
+    traffic_pct: float = Query(
+        ..., ge=0, le=100, description="Percentage of traffic to route (0-100)"
+    ),
     current_user: dict = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """TR-106: Configure A/B traffic split between model versions."""
@@ -220,6 +278,7 @@ async def rollback_model(
 # TR-109 + AG-002/003: BIAS DETECTION & FAIRNESS MONITORING
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class BiasMetrics(BaseModel):
     analysis_date: str
     total_cases_analyzed: int
@@ -228,12 +287,12 @@ class BiasMetrics(BaseModel):
     approval_rate_by_age_group: Dict[str, float]
     approval_rate_by_geography: Dict[str, float]
     # Statistical parity measures (AG-003)
-    demographic_parity_score: float       # 1.0 = perfect parity
+    demographic_parity_score: float  # 1.0 = perfect parity
     equalized_odds_score: float
-    disparate_impact_ratio: float         # <0.8 triggers alert
+    disparate_impact_ratio: float  # <0.8 triggers alert
     # Flags
     flagged_disparities: List[str]
-    alert_level: str                      # OK | WARN | ALERT
+    alert_level: str  # OK | WARN | ALERT
 
 
 @router.get("/ml/bias-report", tags=["ML Ops"])
@@ -249,15 +308,27 @@ async def get_bias_report(
     return BiasMetrics(
         analysis_date=datetime.utcnow().isoformat(),
         total_cases_analyzed=12847,
-        approval_rate_by_gender={"Male": 0.687, "Female": 0.691, "Other/Unknown": 0.683},
-        approval_rate_by_age_group={"18-35": 0.712, "36-50": 0.694, "51-65": 0.671, "65+": 0.658},
+        approval_rate_by_gender={
+            "Male": 0.687,
+            "Female": 0.691,
+            "Other/Unknown": 0.683,
+        },
+        approval_rate_by_age_group={
+            "18-35": 0.712,
+            "36-50": 0.694,
+            "51-65": 0.671,
+            "65+": 0.658,
+        },
         approval_rate_by_geography={
-            "Northeast": 0.694, "Southeast": 0.671, "Midwest": 0.689,
-            "Southwest": 0.678, "West": 0.701,
+            "Northeast": 0.694,
+            "Southeast": 0.671,
+            "Midwest": 0.689,
+            "Southwest": 0.678,
+            "West": 0.701,
         },
         demographic_parity_score=0.97,
         equalized_odds_score=0.95,
-        disparate_impact_ratio=0.92,   # >0.8 = OK
+        disparate_impact_ratio=0.92,  # >0.8 = OK
         flagged_disparities=[],
         alert_level="OK",
     )
@@ -283,21 +354,22 @@ async def get_bias_by_case_type(
 # AG-006: MODEL DRIFT MONITORING
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class DriftReport(BaseModel):
     report_date: str
     model_version: str
     # Feature drift (input distribution shift)
-    feature_drift_score: float        # PSI score; >0.2 = significant drift
-    feature_drift_flags: List[str]    # Features with high drift
+    feature_drift_score: float  # PSI score; >0.2 = significant drift
+    feature_drift_flags: List[str]  # Features with high drift
     # Prediction drift (output distribution shift)
     prediction_drift_score: float
-    approval_rate_change: float       # % change vs baseline
+    approval_rate_change: float  # % change vs baseline
     confidence_distribution_shift: float
     # Performance drift
-    accuracy_vs_baseline: float       # Current vs training accuracy
+    accuracy_vs_baseline: float  # Current vs training accuracy
     auc_vs_baseline: float
     # Alert
-    drift_level: str                  # OK | WARN | ALERT
+    drift_level: str  # OK | WARN | ALERT
     recommended_action: str
 
 
@@ -319,12 +391,12 @@ async def get_drift_report(
     report = DriftReport(
         report_date=datetime.utcnow().isoformat(),
         model_version=model_version,
-        feature_drift_score=0.04,          # PSI < 0.1 = negligible
+        feature_drift_score=0.04,  # PSI < 0.1 = negligible
         feature_drift_flags=[],
         prediction_drift_score=0.02,
-        approval_rate_change=0.3,           # +0.3% vs baseline
+        approval_rate_change=0.3,  # +0.3% vs baseline
         confidence_distribution_shift=0.01,
-        accuracy_vs_baseline=-0.1,          # -0.1% vs baseline = acceptable
+        accuracy_vs_baseline=-0.1,  # -0.1% vs baseline = acceptable
         auc_vs_baseline=-0.002,
         drift_level="OK",
         recommended_action="No action required. Model performing within baseline bounds.",
@@ -344,23 +416,27 @@ async def force_drift_check(
         raise HTTPException(403, "Admin required")
     redis = await get_redis()
     await redis.delete("drift_report:v2.4.1")
-    return {"status": "cache_cleared", "message": "Drift check will recompute on next request"}
+    return {
+        "status": "cache_cleared",
+        "message": "Drift check will recompute on next request",
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TR-306: WEBHOOKS
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class WebhookRegistration(BaseModel):
     url: str
-    events: List[str]    # e.g. ["PA_APPROVED", "PA_DENIED", "APPEAL_RESOLVED"]
-    secret: str          # HMAC-SHA256 signing secret
+    events: List[str]  # e.g. ["PA_APPROVED", "PA_DENIED", "APPEAL_RESOLVED"]
+    secret: str  # HMAC-SHA256 signing secret
     description: Optional[str]
     active: bool = True
 
 
 class WebhookEvent(BaseModel):
-    event_type: str      # PA_APPROVED | PA_DENIED | PA_PENDED | APPEAL_SUBMITTED | etc.
+    event_type: str  # PA_APPROVED | PA_DENIED | PA_PENDED | APPEAL_SUBMITTED | etc.
     pa_id: str
     pa_number: str
     occurred_at: str
@@ -368,9 +444,16 @@ class WebhookEvent(BaseModel):
 
 
 PA_WEBHOOK_EVENTS = [
-    "PA_SUBMITTED", "PA_IN_REVIEW", "PA_APPROVED", "PA_DENIED", "PA_PENDED",
-    "PA_MORE_INFO_REQUESTED", "APPEAL_SUBMITTED", "APPEAL_APPROVED",
-    "APPEAL_DENIED", "AUTH_EXPIRING_SOON",
+    "PA_SUBMITTED",
+    "PA_IN_REVIEW",
+    "PA_APPROVED",
+    "PA_DENIED",
+    "PA_PENDED",
+    "PA_MORE_INFO_REQUESTED",
+    "APPEAL_SUBMITTED",
+    "APPEAL_APPROVED",
+    "APPEAL_DENIED",
+    "AUTH_EXPIRING_SOON",
 ]
 
 
@@ -383,7 +466,9 @@ async def register_webhook(
     # Validate events
     invalid = [e for e in registration.events if e not in PA_WEBHOOK_EVENTS]
     if invalid:
-        raise HTTPException(400, f"Unknown events: {invalid}. Valid: {PA_WEBHOOK_EVENTS}")
+        raise HTTPException(
+            400, f"Unknown events: {invalid}. Valid: {PA_WEBHOOK_EVENTS}"
+        )
 
     webhook_id = str(uuid4())
     redis = await get_redis()
@@ -395,12 +480,19 @@ async def register_webhook(
         "delivery_failures": 0,
     }
     await redis.hset("webhooks", webhook_id, json.dumps(webhook_data))
-    log.info("webhook.registered", webhook_id=webhook_id, url=registration.url, events=registration.events)
+    log.info(
+        "webhook.registered",
+        webhook_id=webhook_id,
+        url=registration.url,
+        events=registration.events,
+    )
     return {"webhook_id": webhook_id, "status": "active", "events": registration.events}
 
 
 @router.get("/webhooks", tags=["Webhooks"])
-async def list_webhooks(current_user: dict = Depends(get_current_user)) -> List[Dict[str, Any]]:
+async def list_webhooks(
+    current_user: dict = Depends(get_current_user),
+) -> List[Dict[str, Any]]:
     """TR-306: List all registered webhook endpoints."""
     redis = await get_redis()
     raw = await redis.hgetall("webhooks") or {}
@@ -412,7 +504,9 @@ async def list_webhooks(current_user: dict = Depends(get_current_user)) -> List[
 
 
 @router.delete("/webhooks/{webhook_id}", tags=["Webhooks"])
-async def delete_webhook(webhook_id: str, current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
+async def delete_webhook(
+    webhook_id: str, current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
     """TR-306: Deregister a webhook."""
     redis = await get_redis()
     await redis.hdel("webhooks", webhook_id)
@@ -437,12 +531,15 @@ async def test_webhook(
     return {"status": "test_queued", "event": "WEBHOOK_TEST"}
 
 
-async def _deliver_webhook(webhook_id: str, event: WebhookEvent, max_retries: int = 3) -> None:
+async def _deliver_webhook(
+    webhook_id: str, event: WebhookEvent, max_retries: int = 3
+) -> None:
     """
     Internal: deliver a webhook event with HMAC-SHA256 signature and retry logic.
     TR-306, NFR-304 (circuit breaker pattern via exponential backoff).
     """
     import httpx
+
     redis = await get_redis()
     raw = await redis.hget("webhooks", webhook_id)
     if not raw:
@@ -451,7 +548,10 @@ async def _deliver_webhook(webhook_id: str, event: WebhookEvent, max_retries: in
     webhook = json.loads(raw)
     if not webhook.get("active"):
         return
-    if event.event_type not in webhook.get("events", []) and event.event_type != "WEBHOOK_TEST":
+    if (
+        event.event_type not in webhook.get("events", [])
+        and event.event_type != "WEBHOOK_TEST"
+    ):
         return
 
     payload_str = json.dumps(event.dict())
@@ -473,17 +573,25 @@ async def _deliver_webhook(webhook_id: str, event: WebhookEvent, max_retries: in
                     },
                 )
                 if resp.status_code < 300:
-                    log.info("webhook.delivered", webhook_id=webhook_id, event=event.event_type)
+                    log.info(
+                        "webhook.delivered",
+                        webhook_id=webhook_id,
+                        event=event.event_type,
+                    )
                     return
         except Exception as exc:
             log.warning("webhook.delivery_failed", attempt=attempt, error=str(exc))
-            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+            await asyncio.sleep(2**attempt)  # Exponential backoff
 
     # After all retries, increment failure counter
     webhook["delivery_failures"] = webhook.get("delivery_failures", 0) + 1
     if webhook["delivery_failures"] >= 10:
         webhook["active"] = False
-        log.error("webhook.auto_disabled", webhook_id=webhook_id, failures=webhook["delivery_failures"])
+        log.error(
+            "webhook.auto_disabled",
+            webhook_id=webhook_id,
+            failures=webhook["delivery_failures"],
+        )
     await redis.hset("webhooks", webhook_id, json.dumps(webhook))
 
 
@@ -499,10 +607,11 @@ async def broadcast_webhook_event(event: WebhookEvent) -> None:
 # TR-304: SFTP / BATCH FILE EXCHANGE
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class BatchJob(BaseModel):
     job_id: str
-    job_type: str    # PA_BATCH_SUBMIT | EDI_278_BATCH | ELIGIBILITY_BATCH | CLAIMS_SYNC
-    status: str      # QUEUED | PROCESSING | COMPLETED | FAILED
+    job_type: str  # PA_BATCH_SUBMIT | EDI_278_BATCH | ELIGIBILITY_BATCH | CLAIMS_SYNC
+    status: str  # QUEUED | PROCESSING | COMPLETED | FAILED
     file_name: str
     record_count: int
     processed_count: int
@@ -515,7 +624,10 @@ class BatchJob(BaseModel):
 @router.post("/batch/upload", tags=["Batch / SFTP"])
 async def upload_batch_file(
     file: UploadFile = File(...),
-    job_type: str = Query(..., description="PA_BATCH_SUBMIT | EDI_278_BATCH | ELIGIBILITY_BATCH | CLAIMS_SYNC"),
+    job_type: str = Query(
+        ...,
+        description="PA_BATCH_SUBMIT | EDI_278_BATCH | ELIGIBILITY_BATCH | CLAIMS_SYNC",
+    ),
     current_user: dict = Depends(get_current_user),
     background: BackgroundTasks = BackgroundTasks(),
 ) -> Dict[str, Any]:
@@ -523,7 +635,12 @@ async def upload_batch_file(
     TR-304: Accept batch file upload (EDI 278, eligibility files, claims sync).
     Equivalent to SFTP drop — files processed asynchronously via background task.
     """
-    ALLOWED_TYPES = {"PA_BATCH_SUBMIT", "EDI_278_BATCH", "ELIGIBILITY_BATCH", "CLAIMS_SYNC"}
+    ALLOWED_TYPES = {
+        "PA_BATCH_SUBMIT",
+        "EDI_278_BATCH",
+        "ELIGIBILITY_BATCH",
+        "CLAIMS_SYNC",
+    }
     if job_type not in ALLOWED_TYPES:
         raise HTTPException(400, f"Invalid job_type. Must be one of: {ALLOWED_TYPES}")
 
@@ -554,12 +671,17 @@ async def upload_batch_file(
     background.add_task(_process_batch_file, job_id, job_type, content, file.filename)
     log.info("batch.uploaded", job_id=job_id, job_type=job_type, filename=file.filename)
 
-    return {"job_id": job_id, "status": "QUEUED",
-            "message": f"Batch file queued for processing. Poll GET /batch/jobs/{job_id} for status."}
+    return {
+        "job_id": job_id,
+        "status": "QUEUED",
+        "message": f"Batch file queued for processing. Poll GET /batch/jobs/{job_id} for status.",
+    }
 
 
 @router.get("/batch/jobs/{job_id}", tags=["Batch / SFTP"])
-async def get_batch_job_status(job_id: str, current_user: dict = Depends(get_current_user)) -> BatchJob:
+async def get_batch_job_status(
+    job_id: str, current_user: dict = Depends(get_current_user)
+) -> BatchJob:
     """TR-304: Poll batch job status."""
     redis = await get_redis()
     raw = await redis.get(f"batch_job:{job_id}")
@@ -585,7 +707,9 @@ async def list_batch_jobs(
     return sorted(jobs, key=lambda j: j.submitted_at, reverse=True)
 
 
-async def _process_batch_file(job_id: str, job_type: str, content: bytes, filename: str) -> None:
+async def _process_batch_file(
+    job_id: str, job_type: str, content: bytes, filename: str
+) -> None:
     """Background task: parse and process a batch file."""
     redis = await get_redis()
 
@@ -638,21 +762,27 @@ async def _process_batch_file(job_id: str, job_type: str, content: bytes, filena
             await update_job({"record_count": record_count})
             processed = record_count
 
-        await update_job({
-            "status": "COMPLETED",
-            "processed_count": processed,
-            "error_count": len(errors),
-            "errors": errors,
-            "completed_at": datetime.utcnow().isoformat(),
-        })
-        log.info("batch.completed", job_id=job_id, processed=processed, errors=len(errors))
+        await update_job(
+            {
+                "status": "COMPLETED",
+                "processed_count": processed,
+                "error_count": len(errors),
+                "errors": errors,
+                "completed_at": datetime.utcnow().isoformat(),
+            }
+        )
+        log.info(
+            "batch.completed", job_id=job_id, processed=processed, errors=len(errors)
+        )
 
     except Exception as exc:
-        await update_job({
-            "status": "FAILED",
-            "errors": [str(exc)],
-            "completed_at": datetime.utcnow().isoformat(),
-        })
+        await update_job(
+            {
+                "status": "FAILED",
+                "errors": [str(exc)],
+                "completed_at": datetime.utcnow().isoformat(),
+            }
+        )
         log.error("batch.failed", job_id=job_id, error=str(exc))
 
 
@@ -660,8 +790,11 @@ async def _process_batch_file(job_id: str, job_type: str, content: bytes, filena
 # TR-207: MASTER DATA MANAGEMENT
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @router.get("/mdm/providers/{npi}", tags=["Master Data"])
-async def get_provider(npi: str, current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
+async def get_provider(
+    npi: str, current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
     """TR-207: Look up provider master record by NPI — INT-205 credentialing validation."""
     if len(npi) != 10 or not npi.isdigit():
         raise HTTPException(400, "NPI must be exactly 10 digits")
@@ -675,7 +808,11 @@ async def get_provider(npi: str, current_user: dict = Depends(get_current_user))
         "practice_address": "123 Medical Center Dr, Springfield, IL 62701",
         "phone": "(555) 987-6543",
         "fax": "(555) 987-6544",
-        "network_status": {"UHC": "IN_NETWORK", "Aetna": "IN_NETWORK", "BCBS": "OUT_OF_NETWORK"},
+        "network_status": {
+            "UHC": "IN_NETWORK",
+            "Aetna": "IN_NETWORK",
+            "BCBS": "OUT_OF_NETWORK",
+        },
         "license_status": "ACTIVE",
         "license_expiry": "2027-12-31",
         "debarment_check": "CLEAR",
@@ -684,7 +821,9 @@ async def get_provider(npi: str, current_user: dict = Depends(get_current_user))
 
 
 @router.get("/mdm/facilities/{npi}", tags=["Master Data"])
-async def get_facility(npi: str, current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
+async def get_facility(
+    npi: str, current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
     """TR-207: Look up facility master record by NPI."""
     return {
         "npi": npi,
@@ -701,21 +840,54 @@ async def get_facility(npi: str, current_user: dict = Depends(get_current_user))
 
 
 @router.get("/mdm/payers", tags=["Master Data"])
-async def list_payers(current_user: dict = Depends(get_current_user)) -> List[Dict[str, Any]]:
+async def list_payers(
+    current_user: dict = Depends(get_current_user),
+) -> List[Dict[str, Any]]:
     """TR-207: List all configured payer master records."""
     return [
-        {"payer_id": "UHC", "name": "UnitedHealthcare", "integration": "REST_API", "status": "ACTIVE"},
-        {"payer_id": "AETNA", "name": "Aetna (CVS Health)", "integration": "FHIR_R4", "status": "ACTIVE"},
-        {"payer_id": "BCBS", "name": "Blue Cross Blue Shield", "integration": "EDI_278", "status": "ACTIVE"},
-        {"payer_id": "CIGNA", "name": "Cigna Health", "integration": "REST_API", "status": "ACTIVE"},
-        {"payer_id": "HUMANA", "name": "Humana", "integration": "HL7_V2", "status": "ACTIVE"},
-        {"payer_id": "CAREMARK", "name": "CVS Caremark (Pharmacy)", "integration": "NCPDP", "status": "ACTIVE"},
+        {
+            "payer_id": "UHC",
+            "name": "UnitedHealthcare",
+            "integration": "REST_API",
+            "status": "ACTIVE",
+        },
+        {
+            "payer_id": "AETNA",
+            "name": "Aetna (CVS Health)",
+            "integration": "FHIR_R4",
+            "status": "ACTIVE",
+        },
+        {
+            "payer_id": "BCBS",
+            "name": "Blue Cross Blue Shield",
+            "integration": "EDI_278",
+            "status": "ACTIVE",
+        },
+        {
+            "payer_id": "CIGNA",
+            "name": "Cigna Health",
+            "integration": "REST_API",
+            "status": "ACTIVE",
+        },
+        {
+            "payer_id": "HUMANA",
+            "name": "Humana",
+            "integration": "HL7_V2",
+            "status": "ACTIVE",
+        },
+        {
+            "payer_id": "CAREMARK",
+            "name": "CVS Caremark (Pharmacy)",
+            "integration": "NCPDP",
+            "status": "ACTIVE",
+        },
     ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TR-305: SSO / SAML 2.0 + OAuth 2.0
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.get("/sso/saml/metadata", tags=["SSO"])
 async def saml_metadata() -> Dict[str, Any]:
@@ -778,12 +950,16 @@ async def oauth_token(
 # NFR-304: CIRCUIT BREAKER
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class CircuitBreakerState:
     """
     NFR-304: Circuit breaker for external service calls.
     States: CLOSED (normal) → OPEN (failing) → HALF_OPEN (testing recovery).
     """
-    def __init__(self, name: str, failure_threshold: int = 5, recovery_timeout: int = 60):
+
+    def __init__(
+        self, name: str, failure_threshold: int = 5, recovery_timeout: int = 60
+    ):
         self.name = name
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
@@ -794,7 +970,10 @@ class CircuitBreakerState:
     @property
     def state(self) -> str:
         if self._state == "OPEN":
-            if self._last_failure_time and time.time() - self._last_failure_time > self.recovery_timeout:
+            if (
+                self._last_failure_time
+                and time.time() - self._last_failure_time > self.recovery_timeout
+            ):
                 self._state = "HALF_OPEN"
         return self._state
 
@@ -807,7 +986,9 @@ class CircuitBreakerState:
         self._last_failure_time = time.time()
         if self._failures >= self.failure_threshold:
             self._state = "OPEN"
-            log.warning("circuit_breaker.open", service=self.name, failures=self._failures)
+            log.warning(
+                "circuit_breaker.open", service=self.name, failures=self._failures
+            )
 
     def allow_request(self) -> bool:
         return self.state != "OPEN"
@@ -815,19 +996,21 @@ class CircuitBreakerState:
 
 # Circuit breakers for all external dependencies
 _circuit_breakers: Dict[str, CircuitBreakerState] = {
-    "uhc_api":       CircuitBreakerState("uhc_api"),
-    "aetna_api":     CircuitBreakerState("aetna_api"),
-    "bcbs_api":      CircuitBreakerState("bcbs_api"),
-    "cigna_api":     CircuitBreakerState("cigna_api"),
-    "mcg_api":       CircuitBreakerState("mcg_api"),
+    "uhc_api": CircuitBreakerState("uhc_api"),
+    "aetna_api": CircuitBreakerState("aetna_api"),
+    "bcbs_api": CircuitBreakerState("bcbs_api"),
+    "cigna_api": CircuitBreakerState("cigna_api"),
+    "mcg_api": CircuitBreakerState("mcg_api"),
     "interqual_api": CircuitBreakerState("interqual_api"),
-    "nppes_api":     CircuitBreakerState("nppes_api"),
-    "textract":      CircuitBreakerState("textract"),
+    "nppes_api": CircuitBreakerState("nppes_api"),
+    "textract": CircuitBreakerState("textract"),
 }
 
 
 @router.get("/circuit-breakers", tags=["Reliability"])
-async def get_circuit_breaker_status(current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
+async def get_circuit_breaker_status(
+    current_user: dict = Depends(get_current_user),
+) -> Dict[str, Any]:
     """NFR-304: View current circuit breaker states for all external dependencies."""
     return {
         name: {
@@ -840,9 +1023,15 @@ async def get_circuit_breaker_status(current_user: dict = Depends(get_current_us
 
 
 @router.post("/circuit-breakers/{service}/reset", tags=["Reliability"])
-async def reset_circuit_breaker(service: str, current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
+async def reset_circuit_breaker(
+    service: str, current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
     """NFR-304: Manually reset a circuit breaker (after fixing the downstream service)."""
     if service not in _circuit_breakers:
         raise HTTPException(404, f"Unknown service: {service}")
     _circuit_breakers[service].record_success()
-    return {"service": service, "state": "CLOSED", "message": "Circuit breaker manually reset"}
+    return {
+        "service": service,
+        "state": "CLOSED",
+        "message": "Circuit breaker manually reset",
+    }

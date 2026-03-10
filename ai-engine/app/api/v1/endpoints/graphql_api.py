@@ -4,6 +4,7 @@ Provides GraphQL interface for PA queries alongside the existing REST API.
 Schema covers: PA status queries, AI analysis, reviewer workbench, analytics.
 Uses Strawberry (type-safe GraphQL library for Python/FastAPI).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -19,6 +20,7 @@ from app.core.redis_client import get_redis
 
 
 # ─── Types ────────────────────────────────────────────────────────────────────
+
 
 @strawberry.type
 class PAStatusType:
@@ -136,6 +138,7 @@ class ModelVersionType:
 
 # ─── Queries ──────────────────────────────────────────────────────────────────
 
+
 @strawberry.type
 class Query:
 
@@ -216,7 +219,9 @@ class Query:
         return []
 
     @strawberry.field(description="Get analytics summary dashboard")
-    async def analytics_summary(self, date_range_days: int = 30) -> AnalyticsSummaryType:
+    async def analytics_summary(
+        self, date_range_days: int = 30
+    ) -> AnalyticsSummaryType:
         """Aggregate KPI metrics for admin dashboard."""
         return AnalyticsSummaryType(
             total_pas_received=12847,
@@ -273,6 +278,7 @@ class Query:
 
 
 # ─── Mutations ────────────────────────────────────────────────────────────────
+
 
 @strawberry.type
 class Mutation:
@@ -360,6 +366,7 @@ class Mutation:
 
 # ─── Subscriptions (real-time) ────────────────────────────────────────────────
 
+
 @strawberry.type
 class Subscription:
 
@@ -370,6 +377,7 @@ class Subscription:
         Uses Redis pub/sub under the hood — TR-004 event-driven architecture.
         """
         import asyncio
+
         try:
             redis = await get_redis()
             pubsub = redis.pubsub()
@@ -380,6 +388,7 @@ class Subscription:
         except Exception:
             # Fallback for demo mode
             import asyncio
+
             for _ in range(3):
                 await asyncio.sleep(5)
                 yield f'{{"pa_id": "{pa_id}", "status": "IN_REVIEW"}}'
@@ -395,6 +404,6 @@ schema = strawberry.Schema(
 
 graphql_router = GraphQLRouter(
     schema,
-    graphiql=True,       # Enable GraphiQL IDE at /graphql
+    graphiql=True,  # Enable GraphiQL IDE at /graphql
     path="/graphql",
 )

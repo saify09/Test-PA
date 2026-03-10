@@ -3,6 +3,7 @@ Pytest test suite for the PA AI Engine.
 Tests: schemas, criteria engine, NLP extractor, auto-decision, API endpoints.
 Run: pytest tests/ -v --tb=short
 """
+
 import asyncio
 from datetime import date, datetime, timezone
 from typing import AsyncGenerator
@@ -13,12 +14,25 @@ from httpx import AsyncClient, ASGITransport
 
 from app.main import app
 from app.schemas.pa_schemas import (
-    PASubmissionRequest, MemberInfo, ProviderInfo, DiagnosisCode,
-    ProcedureCode, ServiceType, UrgencyLevel, PayerCode, RouteDecision,
+    PASubmissionRequest,
+    MemberInfo,
+    ProviderInfo,
+    DiagnosisCode,
+    ProcedureCode,
+    ServiceType,
+    UrgencyLevel,
+    PayerCode,
+    RouteDecision,
 )
 from app.services.criteria_engine import CriteriaEngine
 from app.services.auto_decision import AutoDecisionService
-from app.core.security import hash_password, verify_password, encrypt_phi, decrypt_phi, mask_phi
+from app.core.security import (
+    hash_password,
+    verify_password,
+    encrypt_phi,
+    decrypt_phi,
+    mask_phi,
+)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -35,8 +49,14 @@ def sample_submission() -> PASubmissionRequest:
             payer=PayerCode.UHC,
         ),
         provider=ProviderInfo(npi="1234567890", name="Dr. Jane Smith"),
-        diagnoses=[DiagnosisCode(code="M511", description="Lumbar disc herniation", is_primary=True)],
-        procedures=[ProcedureCode(code="72148", description="MRI Lumbar Spine without contrast")],
+        diagnoses=[
+            DiagnosisCode(
+                code="M511", description="Lumbar disc herniation", is_primary=True
+            )
+        ],
+        procedures=[
+            ProcedureCode(code="72148", description="MRI Lumbar Spine without contrast")
+        ],
         service_type=ServiceType.DIAGNOSTIC_IMAGING,
         requested_start_date=date(2026, 4, 1),
         clinical_summary=(
@@ -128,9 +148,11 @@ class TestSchemas:
     def test_member_id_uppercased(self):
         m = MemberInfo(
             member_id="uhc123",
-            first_name="A", last_name="B",
+            first_name="A",
+            last_name="B",
             date_of_birth=date(1980, 1, 1),
-            gender="M", payer=PayerCode.UHC,
+            gender="M",
+            payer=PayerCode.UHC,
         )
         assert m.member_id == "UHC123"
 
@@ -151,8 +173,10 @@ class TestCriteriaEngine:
         assert result.route_decision is not None
 
     @pytest.mark.asyncio
-    async def test_rich_clinical_summary_higher_confidence(self, sample_submission, sparse_submission):
-        rich_result   = await CriteriaEngine.analyze(sample_submission)
+    async def test_rich_clinical_summary_higher_confidence(
+        self, sample_submission, sparse_submission
+    ):
+        rich_result = await CriteriaEngine.analyze(sample_submission)
         sparse_result = await CriteriaEngine.analyze(sparse_submission)
         assert rich_result.confidence_score > sparse_result.confidence_score
 
@@ -161,7 +185,11 @@ class TestCriteriaEngine:
         result = await CriteriaEngine.analyze(sample_submission)
         assert result.criteria_evaluation is not None
         assert len(result.criteria_evaluation.criteria) > 0
-        assert result.criteria_evaluation.met_count + result.criteria_evaluation.not_met_count >= 0
+        assert (
+            result.criteria_evaluation.met_count
+            + result.criteria_evaluation.not_met_count
+            >= 0
+        )
 
     @pytest.mark.asyncio
     async def test_high_confidence_routes_to_auto_approve(self, sample_submission):
@@ -173,7 +201,11 @@ class TestCriteriaEngine:
     @pytest.mark.asyncio
     async def test_sparse_submission_routes_to_review(self, sparse_submission):
         result = await CriteriaEngine.analyze(sparse_submission)
-        assert result.route_decision in (RouteDecision.HUMAN_REVIEW, RouteDecision.AUTO_DENY, RouteDecision.ESCALATE)
+        assert result.route_decision in (
+            RouteDecision.HUMAN_REVIEW,
+            RouteDecision.AUTO_DENY,
+            RouteDecision.ESCALATE,
+        )
 
     @pytest.mark.asyncio
     async def test_emergency_always_escalated(self, sample_submission):
@@ -199,13 +231,19 @@ class TestCriteriaEngine:
         """Biologic medication request should trigger step therapy check."""
         submission = PASubmissionRequest(
             pa_number="PA-2026-MED01",
-            member=MemberInfo(member_id="UHC999",first_name="A",last_name="B",
-                              date_of_birth=date(1980,1,1),gender="F",payer=PayerCode.UHC),
-            provider=ProviderInfo(npi="1234567890",name="Dr. Test"),
-            diagnoses=[DiagnosisCode(code="M0500",is_primary=True)],
+            member=MemberInfo(
+                member_id="UHC999",
+                first_name="A",
+                last_name="B",
+                date_of_birth=date(1980, 1, 1),
+                gender="F",
+                payer=PayerCode.UHC,
+            ),
+            provider=ProviderInfo(npi="1234567890", name="Dr. Test"),
+            diagnoses=[DiagnosisCode(code="M0500", is_primary=True)],
             procedures=[ProcedureCode(code="J0135")],
             service_type=ServiceType.SPECIALTY_MEDICATION,
-            requested_start_date=date(2026,4,1),
+            requested_start_date=date(2026, 4, 1),
             clinical_summary="Rheumatoid arthritis failing methotrexate after 6 months. Requesting adalimumab.",
             urgency=UrgencyLevel.ROUTINE,
         )
@@ -224,7 +262,10 @@ class TestAutoDecision:
         ai_result.criteria_evaluation.missing_info_list = []
 
         decision = await AutoDecisionService.evaluate(sample_submission, ai_result)
-        assert decision.decision.value in ("AUTO_APPROVED", "IN_REVIEW")  # depends on feature flag
+        assert decision.decision.value in (
+            "AUTO_APPROVED",
+            "IN_REVIEW",
+        )  # depends on feature flag
 
     @pytest.mark.asyncio
     async def test_human_review_band(self, sample_submission):
@@ -258,13 +299,18 @@ class TestAutoDecision:
 def mock_auth_header():
     """Generate a valid test JWT."""
     from app.core.security import create_access_token
-    token = create_access_token({"sub": "test-user", "name": "Test User", "role": "REVIEWER_RN"})
+
+    token = create_access_token(
+        {"sub": "test-user", "name": "Test User", "role": "REVIEWER_RN"}
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.mark.asyncio
 async def test_health_endpoint():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.get("/health")
     assert resp.status_code == 200
     data = resp.json()
@@ -274,7 +320,9 @@ async def test_health_endpoint():
 
 @pytest.mark.asyncio
 async def test_analyze_endpoint_authenticated(sample_submission, mock_auth_header):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post(
             "/api/v1/ai/analyze",
             json=sample_submission.model_dump(mode="json"),
@@ -289,7 +337,9 @@ async def test_analyze_endpoint_authenticated(sample_submission, mock_auth_heade
 
 @pytest.mark.asyncio
 async def test_analyze_requires_auth(sample_submission):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post(
             "/api/v1/ai/analyze",
             json=sample_submission.model_dump(mode="json"),
@@ -299,9 +349,13 @@ async def test_analyze_requires_auth(sample_submission):
 
 @pytest.mark.asyncio
 async def test_login_demo_user():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/v1/auth/login",
-                                 json={"username": "reviewer1", "password": "Review@1234"})
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "reviewer1", "password": "Review@1234"},
+        )
     assert resp.status_code == 200
     data = resp.json()
     assert "access_token" in data
@@ -310,15 +364,20 @@ async def test_login_demo_user():
 
 @pytest.mark.asyncio
 async def test_login_bad_credentials():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/v1/auth/login",
-                                 json={"username": "nobody", "password": "wrong"})
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            "/api/v1/auth/login", json={"username": "nobody", "password": "wrong"}
+        )
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_me_endpoint(mock_auth_header):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.get("/api/v1/auth/me", headers=mock_auth_header)
     assert resp.status_code == 200
     data = resp.json()

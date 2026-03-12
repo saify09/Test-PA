@@ -7,7 +7,7 @@ Uses Strawberry (type-safe GraphQL library for Python/FastAPI).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, AsyncGenerator
 
 import strawberry
 from strawberry.fastapi import GraphQLRouter
@@ -364,7 +364,7 @@ class Mutation:
 class Subscription:
 
     @strawberry.subscription(description="Real-time PA status updates")
-    async def pa_status_updates(self, pa_id: str):  # type: ignore[override]
+    async def pa_status_updates(self, pa_id: str) -> AsyncGenerator[str, None]:  # type: ignore[override]
         """
         WebSocket subscription for real-time PA status changes.
         Uses Redis pub/sub under the hood — TR-004 event-driven architecture.
@@ -395,6 +395,6 @@ schema = strawberry.Schema(
 
 graphql_router = GraphQLRouter(
     schema,
-    graphiql=True,       # Enable GraphiQL IDE at /graphql
+    graphql_ide="graphiql",       # Enable GraphiQL IDE at /graphql (Strawberry >= 0.194.0)
     path="/graphql",
 )

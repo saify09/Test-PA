@@ -83,7 +83,7 @@ class ProviderIn(BaseModel):
     fax: Optional[str] = None
 
 class IntakeRequest(BaseModel):
-    """Universal intake schema — all channels normalize to this."""
+    """Universal intake schema — all channels normalize to this (FLS §2, FR-001)."""
     # Source
     source_channel: str = "PORTAL"  # PORTAL | EHR | FAX | EDI | API
     external_ref:   Optional[str] = None
@@ -91,16 +91,28 @@ class IntakeRequest(BaseModel):
     # Parties
     member:   MemberIn
     provider: ProviderIn
+    ordering_provider: Optional[ProviderIn] = None   # FLS §2.4 — ordering vs rendering
+    rendering_provider: Optional[ProviderIn] = None  # FLS §2.4
 
-    # Clinical
+    # Clinical — core
     diagnoses:  List[DiagnosisIn] = Field(..., min_length=1)
     procedures: List[ProcedureIn] = Field(..., min_length=1)
     service_type: str
     place_of_service: str = "11"
+    place_of_service_name: Optional[str] = None
     requested_start_date: date
     requested_units: int = Field(default=1, ge=1)
     clinical_summary: str = Field(..., min_length=5)
     urgency: str = "ROUTINE"
+
+    # Clinical — extended (FLS §2.5, Field-Level Specs)
+    frequency: Optional[str] = None           # e.g. "1x per week" — Required for PT/Home Health
+    duration: Optional[str] = None            # e.g. "6 weeks" — Required for SURGICAL/PT
+    prior_treatments: List[str] = []          # Step-therapy evidence for SPECIALTY_MEDICATION
+    lab_results: Optional[str] = None         # Free-text or JSON lab summary
+    estimated_cost: Optional[float] = None    # Estimated cost for utilization mgmt
+    chief_complaint: Optional[str] = None     # Patient's chief complaint
+    hpi: Optional[str] = None                 # History of Present Illness
 
     # Attachments
     document_ids: List[str] = []
@@ -138,12 +150,25 @@ REQUIRED_FIELDS = {
     "DIAGNOSTIC_IMAGING":   ["diagnoses", "procedures", "clinical_summary", "requested_start_date"],
     "SURGICAL_PROCEDURE":   ["diagnoses", "procedures", "clinical_summary", "requested_start_date"],
     "SPECIALTY_MEDICATION": ["diagnoses", "procedures", "clinical_summary"],
+    "PHYSICAL_THERAPY":     ["diagnoses", "procedures", "clinical_summary", "frequency"],
+    "HOME_HEALTH":          ["diagnoses", "procedures", "clinical_summary", "frequency", "duration"],
     "DEFAULT":              ["diagnoses", "procedures", "clinical_summary"],
 }
 
+# PRD FR-401/FR-402: Correct SLA deadlines by urgency level
+SLA_HOURS: Dict[str, int] = {
+    "EMERGENCY":  8,   # FR-402: Life-threatening → 8 hours
+    "EMERGENT":   8,   # alias
+    "URGENT":    24,   # Non-emergent urgent → 24 hours
+    "EXPEDITED": 48,  # Expedited review → 48 hours
+    "ROUTINE":   72,  # Standard review → 72 hours
+}
+
 def validate_intake(req: IntakeRequest) -> List[str]:
-    """Returns list of missing/invalid fields."""
+    """Returns list of missing/invalid fields — FR-006: Auto-request missing info."""
     issues = []
+
+    # Core checks (all service types)
     if not any(d.is_primary for d in req.diagnoses):
         issues.append("No primary diagnosis designated")
     if len(req.clinical_summary) < 20:
@@ -152,6 +177,26 @@ def validate_intake(req: IntakeRequest) -> List[str]:
         issues.append("Requested start date appears incorrect")
     if not req.member.member_id or len(req.member.member_id) < 4:
         issues.append("Invalid member ID")
+
+    # Service-type specific checks (FLS §2.5)
+    stype = (req.service_type or "").upper()
+
+    if stype == "SPECIALTY_MEDICATION":
+        # Step therapy evidence is mandatory for specialty biologics
+        if not req.prior_treatments:
+            issues.append(
+                "Step therapy documentation required: list prior treatments tried "
+                "(e.g., methotrexate, NSAIDs) for specialty medication requests"
+            )
+
+    if stype in ("SURGICAL_PROCEDURE", "PHYSICAL_THERAPY"):
+        if not req.duration:
+            issues.append("Duration of treatment/symptoms required for this service type")
+
+    if stype in ("PHYSICAL_THERAPY", "HOME_HEALTH"):
+        if not req.frequency:
+            issues.append("Treatment frequency required (e.g., '2x per week') for this service type")
+
     return issues
 
 def check_duplicate(pa_number: str, member_id: str, procedure_code: str) -> bool:
@@ -298,24 +343,41 @@ async def submit(req: IntakeRequest, background_tasks: BackgroundTasks):
     # Validation (FR-006)
     missing = validate_intake(req)
 
-    # SLA deadline
-    hours = {"EMERGENCY": 24, "URGENT": 24, "EXPEDITED": 72, "ROUTINE": 72}.get(req.urgency, 72)
-    deadline = datetime.now(timezone.utc).replace(microsecond=0) + __import__('datetime').timedelta(hours=hours)
+    # SLA deadline — FR-401/FR-402: corrected urgency map
+    hours = SLA_HOURS.get(req.urgency.upper(), 72)
+    from datetime import timedelta
+    deadline = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=hours)
     submitted_at = datetime.now(timezone.utc).replace(microsecond=0)
 
-    # Publish to AI engine queue
+    # Publish to AI engine queue — include all extended clinical fields
     event_payload = {
         "pa_number": pa_number,
         "source_channel": req.source_channel,
         "member_id": req.member.member_id,
+        "member_dob": req.member.date_of_birth.isoformat(),
+        "member_gender": req.member.gender,
         "payer": req.member.payer,
         "provider_npi": req.provider.npi,
+        "provider_name": req.provider.name,
+        "provider_specialty": req.provider.specialty,
         "diagnoses": [d.model_dump() for d in req.diagnoses],
         "procedures": [p.model_dump() for p in req.procedures],
         "service_type": req.service_type,
         "urgency": req.urgency,
-        "clinical_summary": req.clinical_summary[:500],
+        "clinical_summary": req.clinical_summary[:2000],
         "submitted_at": submitted_at.isoformat(),
+        "sla_deadline": deadline.isoformat(),
+        "sla_hours": hours,
+        "place_of_service": req.place_of_service,
+        # Extended clinical fields (FLS §2.5)
+        "frequency": req.frequency,
+        "duration": req.duration,
+        "prior_treatments": req.prior_treatments,
+        "lab_results": req.lab_results,
+        "estimated_cost": req.estimated_cost,
+        "chief_complaint": req.chief_complaint,
+        "hpi": req.hpi,
+        "document_ids": req.document_ids,
     }
     background_tasks.add_task(publish_to_ai_queue, pa_number, event_payload)
 
@@ -386,13 +448,49 @@ async def get_status(pa_number: str):
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 
+# ── GET /intake/{pa_number}/sla ────────────────────────────────────────────────
+@app.get("/intake/{pa_number}/sla")
+async def get_sla(pa_number: str):
+    """
+    Return SLA deadline and remaining hours for a PA request.
+    Used by Member Portal to display estimated decision date.
+    FR-401, FR-402.
+    """
+    from datetime import timedelta
+    # Production: retrieve from DB. Demo: derive from PA number timestamp.
+    now = datetime.now(timezone.utc)
+    # Parse submission date from PA number if format PA-YYYY-NNNNNN
+    try:
+        year_part = int(pa_number.split("-")[1]) if "-" in pa_number else now.year
+        submitted_at = datetime(year_part, now.month, now.day, tzinfo=timezone.utc)
+    except Exception:
+        submitted_at = now - timedelta(hours=24)
+
+    # Default to ROUTINE SLA until we resolve from DB
+    urgency = "ROUTINE"
+    hours = SLA_HOURS.get(urgency, 72)
+    sla_deadline = submitted_at + timedelta(hours=hours)
+    hours_remaining = max(0, (sla_deadline - now).total_seconds() / 3600)
+    is_at_risk = hours_remaining < 12
+
+    return {
+        "pa_number": pa_number,
+        "urgency": urgency,
+        "sla_deadline": sla_deadline.isoformat(),
+        "hours_remaining": round(hours_remaining, 1),
+        "is_at_risk": is_at_risk,
+        "sla_hours_total": hours,
+        "checked_at": now.isoformat(),
+    }
+
 # ── POST /intake/validate ──────────────────────────────────────────────────────
 @app.post("/intake/validate")
 async def validate_only(req: IntakeRequest):
-    """Dry-run validation without submitting. Useful for portal pre-check."""
+    """Dry-run validation without submitting. Useful for portal pre-check (FR-006)."""
     issues = validate_intake(req)
     return {
         "valid": len(issues) == 0,
         "issues": issues,
         "required_fields_complete": len(issues) == 0,
+        "service_type_checks_applied": req.service_type,
     }

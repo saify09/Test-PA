@@ -28,7 +28,7 @@ async def check_redis() -> bool:
         return False
 
 
-def get_redis() -> redis.Redis | None:
+async def get_redis() -> redis.Redis | None:
     return _redis_client
 
 

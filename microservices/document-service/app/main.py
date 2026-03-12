@@ -86,6 +86,11 @@ class DocumentRecord(BaseModel):
     procedures_found: List[str] = []
     medications_found:List[str] = []
     lab_values:       Dict[str, Any] = {}
+    # Clinical narrative fields (FLS §3, Reviewer Workbench)
+    chief_complaint:     Optional[str] = None
+    hpi:                 Optional[str] = None
+    physical_exam_findings: Optional[str] = None
+    prior_treatments_found: List[str] = []
     ocr_confidence:   Optional[float] = None
     extraction_confidence: Optional[float] = None
     uploader_id:      Optional[str] = None
@@ -102,6 +107,11 @@ class ExtractionResult(BaseModel):
     medications_found:List[str]
     lab_values:       Dict[str, Any]
     extracted_fields: Dict[str, Any]
+    # Clinical narrative fields — FLS §3.2 (Reviewer Workbench display requirements)
+    chief_complaint:        Optional[str] = None
+    hpi:                    Optional[str] = None
+    physical_exam_findings: Optional[str] = None
+    prior_treatments_found: List[str] = []
     ocr_confidence:   float
     extraction_confidence: float
     processing_ms:    float
@@ -254,8 +264,75 @@ MED_RE = re.compile(
     re.I,
 )
 
+# ── Clinical narrative regex patterns (FLS §3.2 — Reviewer Workbench fields) ─────────
+_CC_RE = re.compile(
+    r"(?:chief.?complaint|cc|reason.?for.?visit|presenting.?complaint)\s*[:\-]\s*"
+    r"([^\n.]{10,250})",
+    re.I,
+)
+_HPI_RE = re.compile(
+    r"(?:history.?of.?present.?illness|hpi|history)\s*[:\-]\s*([^\n]{20,}(?:\n[^\n]{0,}){0,10})",
+    re.I,
+)
+_EXAM_RE = re.compile(
+    r"(?:physical.?exam(?:ination)?|objective|p\.?e\.?)\s*[:\-]\s*"
+    r"([^\n]{20,}(?:\n[^\n]{0,}){0,8})",
+    re.I,
+)
+_PRIOR_TX_RE = re.compile(
+    r"(?:tried|attempted|failed|completed|underwent|received|history.?of)"
+    r"\s+(physical.?therapy|PT|chiropractic|NSAIDs?|ibuprofen|naproxen|conservative"
+    r"|rest|ice|heat|corticosteroid|injection|epidural|acupuncture|massage"
+    r"|methotrexate|leflunomide|sulfasalazine|hydroxychloroquine)",
+    re.I,
+)
+
+
+def _extract_chief_complaint(text: str) -> Optional[str]:
+    """Extract Chief Complaint section. FLS §3.2.1"""
+    m = _CC_RE.search(text)
+    if m:
+        return m.group(1).strip()[:300]
+    # Fallback: first meaningful sentence
+    sentences = [s.strip() for s in text.split(".") if len(s.strip()) > 30]
+    return sentences[0][:200] if sentences else None
+
+
+def _extract_hpi(text: str) -> Optional[str]:
+    """Extract History of Present Illness section. FLS §3.2.2"""
+    m = _HPI_RE.search(text)
+    if m:
+        # Take up to 1000 chars, stop at next section header
+        raw = m.group(1)
+        raw = re.split(r"\n(?:past.?medical|pmh|review.?of.?systems|ros|physical.?exam|objective)", raw, flags=re.I)[0]
+        return raw.strip()[:1000]
+    return None
+
+
+def _extract_physical_exam(text: str) -> Optional[str]:
+    """Extract Physical Examination findings. FLS §3.2.3"""
+    m = _EXAM_RE.search(text)
+    if m:
+        raw = m.group(1)
+        raw = re.split(r"\n(?:assessment|plan|impression|lab|diagnostic)", raw, flags=re.I)[0]
+        return raw.strip()[:800]
+    # Fallback: look for common exam terms
+    exam_terms = re.findall(
+        r"(?:tenderness|range.?of.?motion|ROM|neurological|motor|sensory|"
+        r"reflexes|gait|strength|spasm|swelling|erythema)[^.]{0,100}\.",
+        text, re.I
+    )
+    return " ".join(exam_terms[:5])[:800] if exam_terms else None
+
+
+def _extract_prior_treatments(text: str) -> List[str]:
+    """Extract documented prior treatments tried. FLS §3.2.4 / Step Therapy Evidence"""
+    matches = list(dict.fromkeys(m.group(0).strip() for m in _PRIOR_TX_RE.finditer(text)))
+    return matches[:10]
+
+
 def extract_entities(text: str) -> Dict[str, Any]:
-    """Extract clinical entities from document text."""
+    """Extract ALL clinical entities from document text (FR-003, TR-104)."""
     upper = text.upper()
     diagnoses  = list(dict.fromkeys(ICD10_RE.findall(upper)))[:20]
     cpt        = [c for c in CPT_RE.findall(text) if 10000 <= int(c) <= 99999]
@@ -266,6 +343,7 @@ def extract_entities(text: str) -> Dict[str, Any]:
     for m in LAB_RE.finditer(text):
         labs[m.group(1).lower()] = {"value": m.group(2), "unit": m.group(3) or ""}
 
+    # Structured clinical fields (basic)
     fields = {
         "conservative_therapy": bool(re.search(
             r"(tried|failed|completed)\s+(physical therapy|nsaids|ibuprofen|naproxen|conservative)", text, re.I)),
@@ -367,28 +445,37 @@ async def process_document(doc_id: str):
             except Exception:
                 text = ""
 
-        # Entity extraction
+        # Entity extraction — now includes narrative clinical sections
         entities = extract_entities(text)
 
         # Classify
         doc_type = classify_document(doc["filename"], text)
 
         # Update record
-        doc["extracted_text"]  = text[:5000]  # Store first 5000 chars
-        doc["doc_type"]        = doc_type.value
-        doc["extracted_fields"]= entities["fields"]
-        doc["diagnoses_found"] = entities["diagnoses"]
-        doc["procedures_found"]= entities["procedures"]
-        doc["medications_found"]= entities["medications"]
-        doc["lab_values"]      = entities["labs"]
+        doc["extracted_text"]       = text[:5000]  # Store first 5000 chars
+        doc["doc_type"]             = doc_type.value
+        doc["extracted_fields"]     = entities["fields"]
+        doc["diagnoses_found"]      = entities["diagnoses"]
+        doc["procedures_found"]     = entities["procedures"]
+        doc["medications_found"]    = entities["medications"]
+        doc["lab_values"]           = entities["labs"]
+        # Clinical narrative fields — FLS §3.2 (Reviewer Workbench)
+        doc["chief_complaint"]         = entities.get("chief_complaint")
+        doc["hpi"]                     = entities.get("hpi")
+        doc["physical_exam_findings"]  = entities.get("physical_exam_findings")
+        doc["prior_treatments_found"]  = entities.get("prior_treatments", [])
 
-        # Extraction confidence (heuristic)
-        ext_conf = 0.5
-        if entities["diagnoses"]:   ext_conf += 0.15
-        if entities["procedures"]:  ext_conf += 0.10
-        if entities["medications"]: ext_conf += 0.10
-        if entities["labs"]:        ext_conf += 0.10
-        if len(text) > 200:         ext_conf += 0.05
+        # Extraction confidence — reward presence of structured narrative sections
+        ext_conf = 0.40
+        if entities["diagnoses"]:                       ext_conf += 0.12
+        if entities["procedures"]:                      ext_conf += 0.08
+        if entities["medications"]:                     ext_conf += 0.08
+        if entities["labs"]:                            ext_conf += 0.08
+        if len(text) > 200:                             ext_conf += 0.05
+        if entities.get("chief_complaint"):             ext_conf += 0.06
+        if entities.get("hpi"):                         ext_conf += 0.07
+        if entities.get("physical_exam_findings"):      ext_conf += 0.06
+        if entities.get("prior_treatments"):            ext_conf += 0.05 * min(len(entities["prior_treatments"]), 2)
         doc["extraction_confidence"] = round(min(1.0, ext_conf), 3)
 
         doc["status"]           = ProcessingStatus.EXTRACTED.value

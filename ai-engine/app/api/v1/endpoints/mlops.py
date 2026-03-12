@@ -220,20 +220,173 @@ async def rollback_model(
 # TR-109 + AG-002/003: BIAS DETECTION & FAIRNESS MONITORING
 # ─────────────────────────────────────────────────────────────────────────────
 
+MIN_CASES_FOR_REAL_ANALYSIS = 100   # Minimum records before computing real metrics
+BIAS_CASES_KEY = "bias_case_records" # Redis list key
+DISPARATE_IMPACT_ALERT_THRESHOLD = 0.80
+DISPARATE_IMPACT_WARN_THRESHOLD  = 0.90
+
+
+class BiasCaseRecord(BaseModel):
+    """A single decided case record used for bias analysis. TR-109, AG-002."""
+    pa_id:           str
+    decision:        str        # APPROVED | DENIED | PENDED
+    gender:          Optional[str] = "Unknown"  # Male | Female | Other | Unknown
+    age_group:       Optional[str] = "Unknown"  # 18-35 | 36-50 | 51-65 | 65+
+    geography:       Optional[str] = "Unknown"  # Northeast | Southeast | Midwest | Southwest | West
+    service_type:    Optional[str] = None
+    confidence_score: Optional[float] = None
+    decided_at:      str = ""
+
+
 class BiasMetrics(BaseModel):
-    analysis_date: str
-    total_cases_analyzed: int
+    analysis_date:              str
+    total_cases_analyzed:       int
+    data_source:                str   # "real_data" | "seed_data" (transparent to callers)
     # Demographic approval rates (AG-002: race, age, gender, geography)
-    approval_rate_by_gender: Dict[str, float]
+    approval_rate_by_gender:    Dict[str, float]
     approval_rate_by_age_group: Dict[str, float]
     approval_rate_by_geography: Dict[str, float]
     # Statistical parity measures (AG-003)
-    demographic_parity_score: float       # 1.0 = perfect parity
-    equalized_odds_score: float
-    disparate_impact_ratio: float         # <0.8 triggers alert
+    demographic_parity_score:   float   # min_rate / max_rate across groups; 1.0 = perfect parity
+    equalized_odds_score:       float   # approximation: 1 - std_dev of approval rates
+    disparate_impact_ratio:     float   # < 0.8 triggers ALERT
     # Flags
     flagged_disparities: List[str]
-    alert_level: str                      # OK | WARN | ALERT
+    alert_level:         str            # OK | WARN | ALERT
+
+
+# ── Analysis helpers ───────────────────────────────────────────────
+
+def _compute_approval_rates(records: List[dict], dim: str) -> Dict[str, float]:
+    """
+    Compute approval rate per value of `dim` (e.g. 'gender', 'age_group').
+    Returns {group_value: approval_rate_float}.
+    """
+    counts: Dict[str, Dict[str, int]] = {}   # group -> {approved, total}
+    for r in records:
+        group = r.get(dim) or "Unknown"
+        if group not in counts:
+            counts[group] = {"approved": 0, "total": 0}
+        counts[group]["total"] += 1
+        if r.get("decision", "") == "APPROVED":
+            counts[group]["approved"] += 1
+    return {
+        g: round(v["approved"] / max(v["total"], 1), 4)
+        for g, v in counts.items()
+        if v["total"] >= 5   # Suppress groups with fewer than 5 cases (small-N suppression)
+    }
+
+
+def _demographic_parity(rates: Dict[str, float]) -> float:
+    """min_rate / max_rate. Returns 1.0 if only one group."""
+    if len(rates) <= 1:
+        return 1.0
+    vals = list(rates.values())
+    return round(min(vals) / max(vals), 4) if max(vals) > 0 else 1.0
+
+
+def _equalized_odds_approx(rates: Dict[str, float]) -> float:
+    """1 - coefficient_of_variation of approval rates (simplified equalized odds proxy)."""
+    if len(rates) <= 1:
+        return 1.0
+    import statistics
+    vals = list(rates.values())
+    mean = statistics.mean(vals)
+    if mean == 0:
+        return 1.0
+    std  = statistics.stdev(vals) if len(vals) > 1 else 0.0
+    return round(max(0.0, 1.0 - (std / mean)), 4)
+
+
+def _compute_bias_metrics_from_records(records: List[dict]) -> BiasMetrics:
+    """Compute full bias metrics from a list of decided case records."""
+    gender_rates  = _compute_approval_rates(records, "gender")
+    age_rates     = _compute_approval_rates(records, "age_group")
+    geo_rates     = _compute_approval_rates(records, "geography")
+
+    # Combine all sub-group rates for global disparate impact
+    all_rates = {**gender_rates, **age_rates, **geo_rates}
+    dir_ratio  = _demographic_parity(all_rates)   # reuse min/max logic
+    parity     = _demographic_parity({**gender_rates, **age_rates})
+    eq_odds    = _equalized_odds_approx({**gender_rates, **age_rates, **geo_rates})
+
+    # Flag disparities
+    flagged: List[str] = []
+    for group, rate in all_rates.items():
+        max_rate = max(all_rates.values())
+        if max_rate > 0 and (rate / max_rate) < DISPARATE_IMPACT_ALERT_THRESHOLD:
+            flagged.append(f"{group}: approval rate {rate:.1%} vs max {max_rate:.1%} — disparate impact {rate/max_rate:.2f}")
+
+    # Alert level
+    if dir_ratio < DISPARATE_IMPACT_ALERT_THRESHOLD:
+        alert = "ALERT"
+    elif dir_ratio < DISPARATE_IMPACT_WARN_THRESHOLD:
+        alert = "WARN"
+    else:
+        alert = "OK"
+
+    return BiasMetrics(
+        analysis_date=datetime.utcnow().isoformat(),
+        total_cases_analyzed=len(records),
+        data_source="real_data",
+        approval_rate_by_gender=gender_rates  or {"Male": 0.0, "Female": 0.0},
+        approval_rate_by_age_group=age_rates  or {"18-35": 0.0, "36-50": 0.0},
+        approval_rate_by_geography=geo_rates  or {"Unknown": 0.0},
+        demographic_parity_score=parity,
+        equalized_odds_score=eq_odds,
+        disparate_impact_ratio=dir_ratio,
+        flagged_disparities=flagged,
+        alert_level=alert,
+    )
+
+
+def _seed_bias_metrics() -> BiasMetrics:
+    """
+    Return seed / baseline metrics when fewer than MIN_CASES_FOR_REAL_ANALYSIS
+    records have been collected. Clearly labelled as seed_data in response.
+    """
+    return BiasMetrics(
+        analysis_date=datetime.utcnow().isoformat(),
+        total_cases_analyzed=0,
+        data_source="seed_data",
+        approval_rate_by_gender={"Male": 0.687, "Female": 0.691, "Other/Unknown": 0.683},
+        approval_rate_by_age_group={"18-35": 0.712, "36-50": 0.694, "51-65": 0.671, "65+": 0.658},
+        approval_rate_by_geography={
+            "Northeast": 0.694, "Southeast": 0.671, "Midwest": 0.689,
+            "Southwest": 0.678, "West": 0.701,
+        },
+        demographic_parity_score=0.924,   # 0.658 / 0.712 (65+ vs 18-35)
+        equalized_odds_score=0.962,
+        disparate_impact_ratio=0.924,
+        flagged_disparities=[],
+        alert_level="OK",
+    )
+
+
+# ── API Endpoints ──────────────────────────────────────────────────
+
+@router.post("/ml/bias-report/record", tags=["ML Ops"])
+async def record_bias_case(
+    record: BiasCaseRecord,
+    current_user: dict = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    TR-109: Record a decided case for bias analysis pipeline.
+    Called by the reviewer-workbench / review service on every PA decision.
+    Stores de-identified demographic + decision data in Redis.
+    """
+    redis = await get_redis()
+    payload = {
+        **record.dict(),
+        "decided_at": record.decided_at or datetime.utcnow().isoformat(),
+        "recorded_by": current_user.get("id"),
+    }
+    await redis.rpush(BIAS_CASES_KEY, json.dumps(payload))
+    total = await redis.llen(BIAS_CASES_KEY)
+    log.info("bias.case_recorded", pa_id=record.pa_id, decision=record.decision,
+             gender=record.gender, total_records=total)
+    return {"status": "recorded", "total_records": total,
+            "real_analysis_at": f"{MIN_CASES_FOR_REAL_ANALYSIS} cases"}
 
 
 @router.get("/ml/bias-report", tags=["ML Ops"])
@@ -242,25 +395,37 @@ async def get_bias_report(
     current_user: dict = Depends(get_current_user),
 ) -> BiasMetrics:
     """
-    TR-109, AG-002, AG-003: Bias detection across race, age, gender, geography.
-    Returns statistical parity analysis — disparate impact <0.8 triggers ALERT.
+    TR-109, AG-002, AG-003: Bias detection across age, gender, geography.
+    Computes statistical parity from real decided-case records stored in Redis.
+    Falls back to baseline seed metrics when fewer than 100 cases are recorded.
+    Disparate impact < 0.8 triggers ALERT level.
     """
-    # In production: compute from de-identified analytics DB (TR-206)
-    return BiasMetrics(
-        analysis_date=datetime.utcnow().isoformat(),
-        total_cases_analyzed=12847,
-        approval_rate_by_gender={"Male": 0.687, "Female": 0.691, "Other/Unknown": 0.683},
-        approval_rate_by_age_group={"18-35": 0.712, "36-50": 0.694, "51-65": 0.671, "65+": 0.658},
-        approval_rate_by_geography={
-            "Northeast": 0.694, "Southeast": 0.671, "Midwest": 0.689,
-            "Southwest": 0.678, "West": 0.701,
-        },
-        demographic_parity_score=0.97,
-        equalized_odds_score=0.95,
-        disparate_impact_ratio=0.92,   # >0.8 = OK
-        flagged_disparities=[],
-        alert_level="OK",
-    )
+    redis = await get_redis()
+
+    # Load all stored records from Redis
+    raw_records = await redis.lrange(BIAS_CASES_KEY, 0, -1) or []
+    records: List[dict] = []
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    for r in raw_records:
+        try:
+            obj = json.loads(r)
+            # Filter by time window if decided_at present
+            decided_at_str = obj.get("decided_at", "")
+            if decided_at_str:
+                decided_dt = datetime.fromisoformat(decided_at_str.rstrip("Z"))
+                if decided_dt < cutoff:
+                    continue
+            records.append(obj)
+        except Exception:
+            continue
+
+    if len(records) < MIN_CASES_FOR_REAL_ANALYSIS:
+        log.info("bias.using_seed_data", real_records=len(records),
+                 threshold=MIN_CASES_FOR_REAL_ANALYSIS)
+        return _seed_bias_metrics()
+
+    log.info("bias.computing_real_metrics", records=len(records), days=days)
+    return _compute_bias_metrics_from_records(records)
 
 
 @router.get("/ml/bias-report/by-case-type", tags=["ML Ops"])
@@ -269,13 +434,46 @@ async def get_bias_by_case_type(
     current_user: dict = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """TR-109: Drill-down bias analysis for a specific service category."""
+    redis = await get_redis()
+    raw_records = await redis.lrange(BIAS_CASES_KEY, 0, -1) or []
+    records = []
+    for r in raw_records:
+        try:
+            obj = json.loads(r)
+            if obj.get("service_type", "").upper() == case_type.upper():
+                records.append(obj)
+        except Exception:
+            continue
+
+    if not records:
+        return {
+            "case_type": case_type,
+            "sample_size": 0,
+            "approval_rate_overall": None,
+            "demographic_parity_score": None,
+            "disparities_detected": [],
+            "note": "No recorded cases for this service type yet. Record cases via POST /ml/bias-report/record.",
+        }
+
+    approved   = sum(1 for r in records if r.get("decision") == "APPROVED")
+    total      = len(records)
+    overall    = round(approved / total, 4)
+    gender_rates = _compute_approval_rates(records, "gender")
+    parity     = _demographic_parity(gender_rates)
+    disparities = [f"{g}: {r:.1%}" for g, r in gender_rates.items()
+                   if max(gender_rates.values()) > 0 and r / max(gender_rates.values()) < 0.90]
     return {
-        "case_type": case_type,
-        "sample_size": 1247,
-        "approval_rate_overall": 0.689,
-        "demographic_parity_score": 0.96,
-        "disparities_detected": [],
-        "recommendation": "No action required. Approval rates within acceptable parity bounds.",
+        "case_type":                 case_type,
+        "sample_size":               total,
+        "approval_rate_overall":     overall,
+        "demographic_parity_score":  parity,
+        "approval_rate_by_gender":   gender_rates,
+        "disparities_detected":      disparities,
+        "recommendation": (
+            "Disparity detected — review case assignments and criteria application."
+            if disparities else
+            "No action required. Approval rates within acceptable parity bounds."
+        ),
     }
 
 

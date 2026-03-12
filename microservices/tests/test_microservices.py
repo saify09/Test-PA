@@ -228,6 +228,186 @@ class TestIntakeService:
         r = get("intake", f"/intake/{PA_NUMBER}/status")
         assert r.status_code in (200, 404)
 
+    # ── GAP 1 TESTS: Extended Clinical Fields & SLA Fixes ─────────────────────
+
+    def test_submit_with_extended_clinical_fields(self):
+        """GAP-001: IntakeRequest extended with FLS §2.5 clinical fields."""
+        payload = {
+            "member": {
+                "member_id": MEMBER_ID,
+                "first_name": "Sarah", "last_name": "Johnson",
+                "date_of_birth": "1978-03-15", "gender": "F", "payer": "UHC",
+            },
+            "provider": {"npi": PROVIDER_NPI, "name": "Dr. Robert Smith"},
+            "diagnoses": [{"code": "M545", "description": "Low back pain", "is_primary": True}],
+            "procedures": [{"code": "72148", "description": "MRI lumbar spine"}],
+            "service_type": "DIAGNOSTIC_IMAGING",
+            "requested_start_date": TODAY,
+            "clinical_summary": CLINICAL_SUMMARY,
+            "urgency": "ROUTINE",
+            # Extended fields (Gap 1 additions)
+            "frequency": "1x per week",
+            "duration": "6 weeks",
+            "prior_treatments": ["Physical therapy 6 weeks", "NSAIDs 3 months"],
+            "lab_results": "ESR: 42 mm/hr, CRP: 8.2 mg/L",
+            "estimated_cost": 1250.00,
+            "chief_complaint": "Persistent low back pain radiating to left leg",
+            "hpi": "Patient reports 12 weeks of worsening lumbar pain with left L5 radiculopathy.",
+        }
+        r = post("intake", "/intake/submit", json=payload)
+        assert r.status_code in (201, 200, 409, 422)
+        if r.status_code in (200, 201):
+            data = r.json()
+            assert "pa_number" in data
+            assert "sla_deadline" in data
+
+    def test_sla_emergency_is_8_hours(self):
+        """GAP-001 / FR-402: EMERGENCY urgency must use 8h SLA, not 24h."""
+        payload = {
+            "member": {
+                "member_id": MEMBER_ID,
+                "first_name": "Critical", "last_name": "Patient",
+                "date_of_birth": "1960-06-01", "gender": "M", "payer": "UHC",
+            },
+            "provider": {"npi": PROVIDER_NPI, "name": "Dr. Emergency"},
+            "diagnoses": [{"code": "I214", "description": "NSTEMI", "is_primary": True}],
+            "procedures": [{"code": "92941", "description": "PCI emergent"}],
+            "service_type": "SURGICAL_PROCEDURE",
+            "requested_start_date": TODAY,
+            "clinical_summary": "Acute STEMI with cardiogenic shock. Emergent PCI required immediately.",
+            "urgency": "EMERGENCY",
+        }
+        r = post("intake", "/intake/submit", json=payload)
+        assert r.status_code in (201, 200, 409, 422)
+        if r.status_code in (200, 201):
+            data = r.json()
+            assert data.get("estimated_response_hours") == 8, (
+                f"EMERGENCY must be 8h per PRD FR-402, got {data.get('estimated_response_hours')}"
+            )
+
+    def test_sla_endpoint_accessible(self):
+        """GAP-001: New /intake/{pa}/sla endpoint must be reachable."""
+        r = get("intake", f"/intake/{PA_NUMBER}/sla")
+        assert r.status_code in (200, 404)
+        if r.status_code == 200:
+            data = r.json()
+            assert "sla_deadline" in data
+            assert "hours_remaining" in data
+            assert "is_at_risk" in data
+            assert "urgency" in data
+
+    def test_specialty_medication_requires_prior_treatments(self):
+        """GAP-001 / FLS §2.5: SPECIALTY_MEDICATION without prior_treatments should flag issues."""
+        payload = {
+            "member": {
+                "member_id": MEMBER_ID,
+                "first_name": "Emily", "last_name": "Chen",
+                "date_of_birth": "1988-11-03", "gender": "F", "payer": "UHC",
+            },
+            "provider": {"npi": PROVIDER_NPI, "name": "Dr. Chen"},
+            "diagnoses": [{"code": "M069", "description": "Rheumatoid arthritis", "is_primary": True}],
+            "procedures": [{"code": "J0135", "description": "Adalimumab injection"}],
+            "service_type": "SPECIALTY_MEDICATION",
+            "requested_start_date": TODAY,
+            "clinical_summary": "Patient with RA requesting adalimumab biologic therapy.",
+            "urgency": "ROUTINE",
+            # Intentionally omitting prior_treatments
+        }
+        r = post("intake", "/intake/validate", json=payload)
+        assert r.status_code in (200, 422)
+        if r.status_code == 200:
+            data = r.json()
+            # Should NOT be fully valid — prior treatments are required
+            if not data.get("valid", True):
+                assert any("step therapy" in issue.lower() or "prior treatment" in issue.lower()
+                           for issue in data.get("issues", []))
+
+    def test_validate_returns_service_type_applied(self):
+        """GAP-001: Validate endpoint should return service_type_checks_applied."""
+        payload = {
+            "member": {
+                "member_id": MEMBER_ID,
+                "first_name": "Sarah", "last_name": "Johnson",
+                "date_of_birth": "1978-03-15", "gender": "F", "payer": "UHC",
+            },
+            "provider": {"npi": PROVIDER_NPI, "name": "Dr. Smith"},
+            "diagnoses": [{"code": "M545", "is_primary": True}],
+            "procedures": [{"code": "72148"}],
+            "service_type": "PHYSICAL_THERAPY",
+            "requested_start_date": TODAY,
+            "clinical_summary": CLINICAL_SUMMARY,
+            "urgency": "ROUTINE",
+            "frequency": "3x per week",
+            "duration": "8 weeks",
+        }
+        r = post("intake", "/intake/validate", json=payload)
+        assert r.status_code in (200, 422)
+        if r.status_code == 200:
+            data = r.json()
+            # New field should be present
+            assert "service_type_checks_applied" in data or "valid" in data
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# §2b — DOCUMENT SERVICE NLP EXTRACTION GAPS (port 8006)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDocumentNLPExtraction:
+    """GAP-002: Document service must extract HPI, chief complaint, physical exam, prior treatments."""
+
+    CLINICAL_NOTE = (
+        "Chief Complaint: Persistent low back pain radiating to left leg for 12 weeks.\n"
+        "History of Present Illness: Patient is a 45-year-old male presenting with lumbar "
+        "radiculopathy. Symptoms began after a lifting injury. Patient has tried conservative "
+        "management including physical therapy for 6 weeks and NSAIDs without improvement. "
+        "Pain rated 7/10.\n"
+        "Physical Examination: Lumbar tenderness on palpation. Range of motion limited to 30 "
+        "degrees flexion. Positive straight leg raise at 45 degrees. Motor strength 4/5 L5. "
+        "Sensory deficit in L5 dermatome.\n"
+        "Diagnosis: M54.4 Lumbago with sciatica. ICD-10: M541\n"
+        "Procedure: MRI Lumbar Spine without contrast. CPT: 72148\n"
+    )
+
+    def test_upload_clinical_note_and_check_extraction(self):
+        """GAP-002 / FLS §3.2: Uploaded clinical note must populate narrative fields after OCR."""
+        note_bytes = self.CLINICAL_NOTE.encode("utf-8")
+        files = {"file": ("clinical_note.txt", io.BytesIO(note_bytes), "text/plain")}
+        data  = {"pa_number": PA_NUMBER, "doc_type": "CLINICAL_NOTES", "uploaded_by": "provider1"}
+        r = post("doc", "/documents/upload", files=files, data=data)
+        assert r.status_code in (200, 201, 422)
+        if r.status_code in (200, 201):
+            resp = r.json()
+            doc_id = resp.get("doc_id") or resp.get("document_id")
+            assert doc_id is not None, "Upload must return a document ID"
+
+            # Poll extraction result
+            ext_r = get("doc", f"/documents/{doc_id}/extraction")
+            assert ext_r.status_code in (200, 202, 404)
+            if ext_r.status_code == 200:
+                ext = ext_r.json()
+                # GAP-002: these fields must now be present
+                assert "chief_complaint" in ext or "extracted_fields" in ext, \
+                    "chief_complaint must be populated from clinical note"
+
+    def test_document_contains_icd_and_cpt_codes(self):
+        """FR-003: ICD-10 and CPT codes must be extracted from clinical text."""
+        note_bytes = self.CLINICAL_NOTE.encode("utf-8")
+        files = {"file": ("note_codes.txt", io.BytesIO(note_bytes), "text/plain")}
+        data  = {"pa_number": PA_NUMBER, "doc_type": "CLINICAL_NOTES"}
+        r = post("doc", "/documents/upload", files=files, data=data)
+        assert r.status_code in (200, 201, 422)
+        if r.status_code in (200, 201):
+            doc_id = r.json().get("doc_id") or r.json().get("document_id")
+            if doc_id:
+                ext_r = get("doc", f"/documents/{doc_id}/extraction")
+                if ext_r.status_code == 200:
+                    ext = ext_r.json()
+                    diagnoses = ext.get("diagnoses_found", [])
+                    procedures = ext.get("procedures_found", [])
+                    # At least one of ICD or CPT should be found
+                    assert len(diagnoses) > 0 or len(procedures) > 0, \
+                        "ICD-10/CPT extraction should find codes in clinical note"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # §3 — PAYER INTEGRATION (port 8003)

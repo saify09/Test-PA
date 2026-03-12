@@ -393,12 +393,12 @@ jobs:
         fi
         echo "5xx error rate: $ERROR_RATE"
         python3 -c "
-rate = float('$ERROR_RATE')
-if rate > 0.05:
-    print(f'FAIL: error rate {rate:.2%} > 5% threshold')
-    exit(1)
-print(f'OK: error rate {rate:.2%} within threshold')
-"
+        rate = float('$ERROR_RATE')
+        if rate > 0.05:
+            print(f'FAIL: error rate {rate:.2%} > 5% threshold')
+            exit(1)
+        print(f'OK: error rate {rate:.2%} within threshold')
+        "
 
     - name: Rollback on failure
       if: failure()

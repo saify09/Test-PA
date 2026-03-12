@@ -102,7 +102,7 @@ async def _proxy(method: str, path: str,
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
-@router.post("/auth/login")
+@router.post("/login")
 async def login(request: LoginRequest, req: Request):
     """
     SC-001 / NFR-101: Login with username + password [+ TOTP].
@@ -114,13 +114,13 @@ async def login(request: LoginRequest, req: Request):
     return await _proxy("post", "/auth/login", json=request.model_dump())
 
 
-@router.post("/auth/refresh")
+@router.post("/refresh")
 async def refresh(request: RefreshRequest):
     """NFR-104: Rotate refresh token → new 15-min access token."""
     return await _proxy("post", "/auth/refresh", json=request.model_dump())
 
 
-@router.post("/auth/logout")
+@router.post("/logout")
 async def logout(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
 ):
@@ -129,7 +129,7 @@ async def logout(
     return await _proxy("post", "/auth/logout", headers=hdrs)
 
 
-@router.get("/auth/me")
+@router.get("/me")
 async def me(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
 ):
@@ -138,13 +138,13 @@ async def me(
     return await _proxy("get", "/auth/me", headers=hdrs)
 
 
-@router.post("/auth/forgot-password")
+@router.post("/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest):
     """Anti-enumeration password reset (SC-007). Always returns 200."""
     return await _proxy("post", "/auth/forgot-password", json={"email": request.email})
 
 
-@router.post("/auth/mfa/setup")
+@router.post("/mfa/setup")
 async def mfa_setup(current_user: dict = Depends(get_current_user)):
     """
     SC-001 enrolment step 1: Generate TOTP secret + QR provisioning URI.
@@ -168,7 +168,7 @@ async def mfa_setup(current_user: dict = Depends(get_current_user)):
     }
 
 
-@router.post("/auth/mfa/enable")
+@router.post("/mfa/enable")
 async def mfa_enable(
     request: MFAConfirmRequest,
     current_user: dict = Depends(get_current_user),
@@ -177,7 +177,7 @@ async def mfa_enable(
     return await _proxy("post", "/auth/mfa/enable", json={"totp_code": request.totp_code})
 
 
-@router.post("/auth/mfa/verify")
+@router.post("/mfa/verify")
 async def mfa_verify(
     request: MFAConfirmRequest,
     current_user: dict = Depends(get_current_user),

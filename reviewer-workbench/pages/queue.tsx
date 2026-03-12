@@ -1,3 +1,4 @@
+import type { QueueItem, QueueMetrics } from '../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';

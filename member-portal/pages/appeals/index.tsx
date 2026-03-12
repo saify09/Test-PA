@@ -1,3 +1,4 @@
+import type { MemberAppeal } from '../../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -61,7 +62,7 @@ const AppealsPage: NextPage = () => {
   );
 };
 
-const AppealRow: React.FC<{ appeal: any; onClick: () => void }> = ({ appeal, onClick }) => {
+const AppealRow: React.FC<{ appeal: MemberAppeal; onClick: () => void }> = ({ appeal, onClick }) => {
   const isExpedited = appeal.appeal_type === 'EXPEDITED';
   const statusColors: Record<string, string> = {
     SUBMITTED:  'bg-blue-100 text-blue-700',

@@ -1,3 +1,4 @@
+import type { ReviewerMetrics, QueueMetrics } from '../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -14,8 +15,8 @@ import { CheckCircle, Clock, Activity, Target, TrendingUp, Award } from 'lucide-
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 const MetricsPage: NextPage = () => {
-  const [data, setData] = useState<any>(null);
-  const [aiData, setAiData] = useState<any>(null);
+  const [data, setData] = useState<QueueMetrics | null>(null);
+  const [aiData, setAiData] = useState<QueueMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<'7d' | '30d' | '90d'>('30d');
 
@@ -90,7 +91,7 @@ const MetricsPage: NextPage = () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie data={data?.decisions || []} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={3}>
-                      {(data?.decisions || []).map((_: any, i: number) => (
+                      {(data?.decisions || []).map((_: ReviewerMetrics, i: number) => (
                         <Cell key={i} fill={COLORS[i % COLORS.length]} />
                       ))}
                     </Pie>
@@ -100,7 +101,7 @@ const MetricsPage: NextPage = () => {
                 </ResponsiveContainer>
               </div>
               <div className="space-y-2">
-                {(data?.decisions || []).map((d: any, i: number) => (
+                {(data?.decisions || []).map((d: ReviewerMetrics, i: number) => (
                   <div key={i} className="flex items-center gap-2">
                     <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
                     <div>
@@ -123,7 +124,7 @@ const MetricsPage: NextPage = () => {
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={(v: any) => [`${v} min`, 'Avg Time']} />
+                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={(v: number) => [`${v} min`, 'Avg Time']} />
                   <Line type="monotone" dataKey="avg_time" stroke="#8b5cf6" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="target" stroke="#e5e7eb" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
                 </LineChart>
@@ -139,7 +140,7 @@ const MetricsPage: NextPage = () => {
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis domain={[80, 100]} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={(v: any) => [`${v}%`, 'Agreement']} />
+                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={(v: number) => [`${v}%`, 'Agreement']} />
                   <Line type="monotone" dataKey="rate" stroke="#10b981" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="team_avg" stroke="#e5e7eb" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
                 </LineChart>
@@ -152,7 +153,7 @@ const MetricsPage: NextPage = () => {
         {/* Performance comparison */}
         <Card title="Team Performance Comparison" subtitle="Your ranking vs. peer reviewers">
           <div className="space-y-3">
-            {(data?.team_ranking || []).map((r: any, i: number) => (
+            {(data?.team_ranking || []).map((r: ReviewerMetrics, i: number) => (
               <div key={i} className={cn('flex items-center gap-3 p-3 rounded-lg', r.is_me ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50')}>
                 <div className={cn('w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0',
                   i === 0 ? 'bg-yellow-400 text-yellow-900' : i === 1 ? 'bg-gray-300 text-gray-700' : i === 2 ? 'bg-orange-300 text-orange-900' : 'bg-gray-100 text-gray-600'

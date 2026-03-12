@@ -1,3 +1,4 @@
+import type { StatusResult } from '../lib/types';
 import React, { useState } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -17,7 +18,7 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
 const PublicStatusPage: NextPage = () => {
   const [query, setQuery]       = useState('');
   const [loading, setLoading]   = useState(false);
-  const [result, setResult]     = useState<any>(null);
+  const [result, setResult]     = useState<StatusResult | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   const handleSearch = async () => {

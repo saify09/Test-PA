@@ -87,6 +87,194 @@ services:
     methods: [GET, POST, PUT, DELETE, OPTIONS]
     strip_path: true
 
+# ── Auth service (FLS §8 — session/token management) ─────────────────────────
+- name: auth-service
+  url: http://auth-service.pa-system.svc.cluster.local:8007
+  connect_timeout: 5000
+  write_timeout: 10000
+  read_timeout: 10000
+  retries: 1
+  routes:
+  - name: auth-routes
+    paths: ["/auth"]
+    methods: [GET, POST, OPTIONS]
+    strip_path: false
+    preserve_host: false
+
+# ── AI Engine — provider, reviewer, member, admin API groups ─────────────────
+# All business-logic routes go through ai-engine (port 8001).
+# Grouped by portal to allow per-portal rate limits and auth policies.
+
+- name: ai-engine-prior-auth
+  url: http://ai-engine.pa-system.svc.cluster.local:8001
+  connect_timeout: 5000
+  write_timeout: 30000
+  read_timeout: 30000
+  retries: 2
+  routes:
+  # Provider portal — PA lifecycle
+  - name: prior-auth-routes
+    paths: ["/api/v1/prior-authorizations"]
+    methods: [GET, POST, PUT, DELETE, OPTIONS]
+    strip_path: false
+  # Provider portal — eligibility
+  - name: eligibility-routes
+    paths: ["/api/v1/eligibility"]
+    methods: [GET, POST, OPTIONS]
+    strip_path: false
+  # Provider portal — lookup tables (ICD-10, CPT, NPI, specialties, POS)
+  - name: lookup-routes
+    paths: ["/api/v1/lookup"]
+    methods: [GET, OPTIONS]
+    strip_path: false
+
+- name: ai-engine-reviewer
+  url: http://ai-engine.pa-system.svc.cluster.local:8001
+  connect_timeout: 5000
+  write_timeout: 30000
+  read_timeout: 30000
+  retries: 2
+  routes:
+  # Reviewer workbench — queue management
+  - name: review-queue-routes
+    paths: ["/api/v1/review-queue"]
+    methods: [GET, POST, PUT, DELETE, OPTIONS]
+    strip_path: false
+  # Reviewer workbench — case detail + decisions
+  - name: cases-routes
+    paths: ["/api/v1/cases"]
+    methods: [GET, POST, PUT, DELETE, OPTIONS]
+    strip_path: false
+  # Reviewer workbench — performance metrics
+  - name: metrics-routes
+    paths: ["/api/v1/metrics"]
+    methods: [GET, OPTIONS]
+    strip_path: false
+
+- name: ai-engine-member
+  url: http://ai-engine.pa-system.svc.cluster.local:8001
+  connect_timeout: 5000
+  write_timeout: 15000
+  read_timeout: 15000
+  retries: 2
+  routes:
+  # Member portal — all member-scoped resources
+  - name: member-routes
+    paths: ["/api/v1/member"]
+    methods: [GET, POST, PUT, DELETE, OPTIONS]
+    strip_path: false
+
+- name: ai-engine-admin
+  url: http://ai-engine.pa-system.svc.cluster.local:8001
+  connect_timeout: 5000
+  write_timeout: 30000
+  read_timeout: 60000
+  retries: 1
+  routes:
+  # Admin dashboard — analytics + KPIs
+  - name: admin-analytics-routes
+    paths: ["/api/v1/admin/analytics"]
+    methods: [GET, OPTIONS]
+    strip_path: false
+  # Admin dashboard — user management
+  - name: admin-users-routes
+    paths: ["/api/v1/admin/users"]
+    methods: [GET, POST, PUT, DELETE, OPTIONS]
+    strip_path: false
+  # Admin dashboard — case oversight + exports
+  - name: admin-cases-routes
+    paths: ["/api/v1/admin/cases"]
+    methods: [GET, POST, PUT, OPTIONS]
+    strip_path: false
+  # Admin dashboard — audit log
+  - name: admin-audit-routes
+    paths: ["/api/v1/admin/audit"]
+    methods: [GET, OPTIONS]
+    strip_path: false
+  # Admin dashboard — system health + config
+  - name: admin-system-routes
+    paths: ["/api/v1/admin/system"]
+    methods: [GET, POST, PUT, OPTIONS]
+    strip_path: false
+  # Admin dashboard — notifications
+  - name: admin-notifications-routes
+    paths: ["/api/v1/admin/notifications"]
+    methods: [GET, POST, PUT, DELETE, OPTIONS]
+    strip_path: false
+
+# ── Reporting service ─────────────────────────────────────────────────────────
+- name: reporting-service
+  url: http://reporting-service.pa-system.svc.cluster.local:8009
+  connect_timeout: 5000
+  write_timeout: 60000    # Reports can be large/slow
+  read_timeout: 60000
+  routes:
+  - name: reporting-routes
+    paths: ["/api/v1/reports"]
+    methods: [GET, POST, OPTIONS]
+    strip_path: true
+
+# ── Eligibility service ───────────────────────────────────────────────────────
+- name: eligibility-service
+  url: http://eligibility-service.pa-system.svc.cluster.local:8010
+  connect_timeout: 5000
+  write_timeout: 15000
+  read_timeout: 15000
+  routes:
+  - name: eligibility-service-routes
+    paths: ["/api/v1/eligibility/realtime"]
+    methods: [GET, POST, OPTIONS]
+    strip_path: true
+
+# ── Audit service ─────────────────────────────────────────────────────────────
+- name: audit-service
+  url: http://audit-service.pa-system.svc.cluster.local:8011
+  connect_timeout: 5000
+  write_timeout: 10000
+  read_timeout: 15000
+  routes:
+  - name: audit-service-routes
+    paths: ["/api/v1/audit"]
+    methods: [GET, OPTIONS]
+    strip_path: true
+
+# ── User management service ───────────────────────────────────────────────────
+- name: user-management-service
+  url: http://user-management-service.pa-system.svc.cluster.local:8008
+  connect_timeout: 5000
+  write_timeout: 10000
+  read_timeout: 10000
+  routes:
+  - name: user-mgmt-routes
+    paths: ["/api/v1/users"]
+    methods: [GET, POST, PUT, DELETE, OPTIONS]
+    strip_path: true
+
+# ── Payer integration — full route set ───────────────────────────────────────
+- name: payer-integration-full
+  url: http://payer-integration.pa-system.svc.cluster.local:8003
+  connect_timeout: 5000
+  write_timeout: 35000    # Payer APIs can be slow; FHIR bundles especially
+  read_timeout: 35000
+  retries: 1
+  routes:
+  - name: payer-eligibility
+    paths: ["/api/v1/payer/eligibility"]
+    methods: [POST, OPTIONS]
+    strip_path: true
+  - name: payer-submit
+    paths: ["/api/v1/payer/submit"]
+    methods: [POST, OPTIONS]
+    strip_path: true
+  - name: payer-formulary
+    paths: ["/api/v1/payer/formulary"]
+    methods: [GET, POST, OPTIONS]
+    strip_path: true
+  - name: payer-status
+    paths: ["/api/v1/payer/status"]
+    methods: [GET, POST, OPTIONS]
+    strip_path: true
+
 # ── Global Plugins ─────────────────────────────────────────────────────────────
 plugins:
 
@@ -250,3 +438,63 @@ consumers:
     config:
       minute: 1000
       hour: 20000
+
+# ── Per-route plugins for new routes ──────────────────────────────────────────
+
+# Auth — stricter rate limit (anti-brute-force)
+- name: rate-limiting
+  route: auth-routes
+  config:
+    minute: 10
+    hour: 60
+    policy: redis
+    redis_host: redis-master.pa-system.svc.cluster.local
+    redis_port: 6379
+    redis_database: 6
+    limit_by: ip
+    error_message: "Too many authentication attempts. Please wait before retrying."
+
+# Prior-auth routes — standard provider limit
+- name: rate-limiting
+  route: prior-auth-routes
+  config:
+    minute: 120
+    hour: 2000
+    policy: redis
+    redis_host: redis-master.pa-system.svc.cluster.local
+    redis_port: 6379
+    redis_database: 6
+    limit_by: consumer
+
+# Admin routes — restricted (admin users only)
+- name: rate-limiting
+  route: admin-analytics-routes
+  config:
+    minute: 60
+    hour: 500
+    policy: redis
+    redis_host: redis-master.pa-system.svc.cluster.local
+    redis_port: 6379
+    redis_database: 6
+    limit_by: consumer
+
+# Payer eligibility — tight (real payer API calls are expensive)
+- name: rate-limiting
+  route: payer-eligibility
+  config:
+    minute: 30
+    hour: 300
+    policy: redis
+    redis_host: redis-master.pa-system.svc.cluster.local
+    redis_port: 6379
+    redis_database: 6
+    limit_by: consumer
+
+# Lookup routes — loose (read-only reference data)
+- name: rate-limiting
+  route: lookup-routes
+  config:
+    minute: 300
+    hour: 5000
+    policy: local
+    limit_by: ip

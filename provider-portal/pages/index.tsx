@@ -1,3 +1,4 @@
+import type { PARequest, PAStats, TrendPoint } from './../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -37,7 +38,7 @@ const Dashboard: NextPage = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('ALL');
   const [search, setSearch] = useState('');
-  const [trendData, setTrendData] = useState<any[]>([]);
+  const [useState<TrendPoint[]>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -54,7 +55,7 @@ const Dashboard: NextPage = () => {
       setPAs(paRes.data.items || []);
       setStats(statsRes.data);
       setTrendData(statsRes.data.trend_data || generateMockTrend());
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError('Failed to load data. Using demo mode.');
       setPAs(getMockPAs());
       setStats(getMockStats());

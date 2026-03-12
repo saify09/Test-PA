@@ -1,7 +1,8 @@
 """
 PA AI Engine — FastAPI Application
 Provides clinical criteria matching, document processing, confidence scoring,
-and auto-decision logic for the Prior Authorization system.
+BioBERT/ClinicalBERT NER, RAG-based guideline retrieval, and auto-decision
+logic for the Prior Authorization system.
 """
 import time
 import structlog
@@ -27,11 +28,23 @@ async def lifespan(app: FastAPI):
     log.info("ai_engine.starting", version=settings.APP_VERSION, env=settings.ENVIRONMENT)
     await init_db()
     await init_redis()
-    # Warm up ML models on startup
+    # Warm up ML models on startup (BioBERT, ClinicalBERT, OCR)
     from app.services.criteria_engine import CriteriaEngine
     from app.services.nlp_extractor import NLPExtractor
+    from app.services.model_service import BioBERTService, ClinicalBERTService
+    from app.services.ocr_service import OCRService
     await CriteriaEngine.warmup()
     await NLPExtractor.warmup()
+    await BioBERTService.load()
+    await ClinicalBERTService.load()
+    await OCRService.warmup()
+    # Load RAG engine if enabled
+    if settings.ENABLE_RAG_ENGINE:
+        try:
+            from app.services.rag.rag_engine import ClinicalCriteriaRAG
+            log.info("ai_engine.rag_loading")
+        except Exception as e:
+            log.warning("ai_engine.rag_skipped", reason=str(e))
     log.info("ai_engine.ready")
     yield
     log.info("ai_engine.shutting_down")
@@ -39,7 +52,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="PA AI Engine",
-    description="Clinical criteria matching and AI decision support for Prior Authorization",
+    description="Clinical criteria matching, BioBERT/ClinicalBERT NER, RAG, and AI decision support for Prior Authorization",
     version=settings.APP_VERSION,
     docs_url="/docs" if settings.ENVIRONMENT != "production" else None,
     redoc_url="/redoc" if settings.ENVIRONMENT != "production" else None,
@@ -85,6 +98,10 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(graphql_router)  # TR-003: GraphQL at /graphql with GraphiQL IDE
 
+# Auth routes registered at /auth/* (not under /api/v1) — matches all frontend calls
+from app.api.v1.endpoints.auth import router as auth_router
+app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
+
 
 @app.get("/health", tags=["Health"])
 async def health():
@@ -95,12 +112,27 @@ async def health():
 async def readiness():
     from app.core.database import check_db
     from app.core.redis_client import check_redis
-    db_ok = await check_db()
+    db_ok    = await check_db()
     redis_ok = await check_redis()
-    status = "ready" if db_ok and redis_ok else "not_ready"
+    status   = "ready" if db_ok and redis_ok else "not_ready"
     return {
         "status": status,
-        "checks": {"database": "ok" if db_ok else "fail", "redis": "ok" if redis_ok else "fail"},
+        "checks": {
+            "database": "ok" if db_ok else "fail",
+            "redis":    "ok" if redis_ok else "fail",
+        },
+    }
+
+
+@app.get("/health/models", tags=["Health"])
+async def model_status():
+    """Check AI model availability."""
+    from app.services.model_service import BioBERTService, ClinicalBERTService
+    return {
+        "biobert":       {"loaded": BioBERTService._available,  "model": "dmis-lab/biobert-v1.1"},
+        "clinicalbert":  {"loaded": ClinicalBERTService._available, "model": "emilyalsentzer/Bio_ClinicalBERT"},
+        "rag_engine":    {"enabled": settings.ENABLE_RAG_ENGINE},
+        "ocr":           {"textract_configured": bool(import_check_boto3())},
     }
 
 
@@ -108,3 +140,11 @@ async def readiness():
 async def global_exception_handler(request: Request, exc: Exception):
     log.error("unhandled_exception", path=request.url.path, error=str(exc), exc_info=True)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+def import_check_boto3():
+    try:
+        import boto3
+        return True
+    except ImportError:
+        return False

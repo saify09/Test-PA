@@ -1,3 +1,4 @@
+import type { AdminUser } from '../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -32,7 +33,7 @@ const UsersPage: NextPage = () => {
   const [roleFilter, setRoleFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [tab, setTab]           = useState('users');
-  const [editUser, setEditUser] = useState<any>(null);
+  const [editUser, setEditUser] = useState<AdminUser | null>(null);
   const [createModal, setCreateModal] = useState(false);
 
   const load = async () => {
@@ -52,7 +53,7 @@ const UsersPage: NextPage = () => {
     (statusFilter === 'ALL' || u.status === statusFilter)
   );
 
-  const handleDisable = async (u: any) => {
+  const handleDisable = async (u: AdminUser) => {
     try {
       await (u.status === 'ACTIVE' ? userApi.disable(u.id) : userApi.enable(u.id));
       toast.success(`User ${u.status === 'ACTIVE' ? 'disabled' : 'enabled'}`);
@@ -60,7 +61,7 @@ const UsersPage: NextPage = () => {
     } catch { toast.success('Status updated (demo mode)'); setUsers(prev => prev.map(x => x.id===u.id ? {...x, status: x.status==='ACTIVE'?'INACTIVE':'ACTIVE'} : x)); }
   };
 
-  const handleResetPw = async (u: any) => {
+  const handleResetPw = async (u: AdminUser) => {
     try { await userApi.resetPw(u.id); toast.success(`Password reset email sent to ${u.email}`); }
     catch { toast.success(`Password reset email sent to ${u.email} (demo mode)`); }
   };
@@ -193,7 +194,7 @@ const UsersPage: NextPage = () => {
   );
 };
 
-const UserModal: React.FC<{ user?: any; onClose: () => void; onSave: () => void }> = ({ user, onClose, onSave }) => {
+const UserModal: React.FC<{ user?: AdminUser; onClose: () => void; onSave: () => void }> = ({ user, onClose, onSave }) => {
   const [fullName, setFullName] = useState(user?.full_name || '');
   const [email, setEmail]       = useState(user?.email || '');
   const [role, setRole]         = useState(user?.role || 'REVIEWER_RN');

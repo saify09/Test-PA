@@ -1,3 +1,4 @@
+import type { AdminKPIs, PayerDataPoint, SystemHealth, ServiceStatus } from '../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -19,10 +20,10 @@ import {
 const COLORS = { approved: '#4CAF50', denied: '#F44336', pended: '#FF9800' };
 
 const AdminDashboard: NextPage = () => {
-  const [kpis,   setKpis]   = useState<any>(null);
+  const [kpis,   setKpis]   = useState<AdminKPIs | null>(null);
   const [volume, setVolume] = useState<any[]>([]);
   const [payer,  setPayer]  = useState<any[]>([]);
-  const [health, setHealth] = useState<any>(null);
+  const [health, setHealth] = useState<SystemHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(new Date());
 
@@ -196,7 +197,7 @@ const AdminDashboard: NextPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {payers.map((p: any) => (
+                {payers.map((p: PayerDataPoint) => (
                   <tr key={p.payer}>
                     <td className="font-semibold truncate max-w-[100px]">{p.payer}</td>
                     <td className="text-right mono">{p.total.toLocaleString()}</td>
@@ -215,7 +216,7 @@ const AdminDashboard: NextPage = () => {
           {/* System health */}
           <Card title="System Health" className="lg:col-span-1">
             <div className="space-y-2.5">
-              {(health?.services || []).map((svc: any) => (
+              {(health?.services || []).map((svc: ServiceStatus) => (
                 <div key={svc.name} className="flex items-center justify-between">
                   <StatusIndicator status={svc.status} label={svc.name} />
                   <span className={cn('text-xs font-mono font-semibold',

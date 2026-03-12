@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import type { TrackingResult } from '../lib/types';
 import type { NextPage } from 'next';
 import Head from 'next/head';
 import Layout from '../components/layout/Layout';
@@ -10,7 +11,7 @@ import { Search, CheckCircle, Clock, XCircle, Activity } from 'lucide-react';
 const TrackingPage: NextPage = () => {
   const [paNumber, setPaNumber] = useState('');
   const [memberId, setMemberId] = useState('');
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<TrackingResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
@@ -104,7 +105,7 @@ const TrackingPage: NextPage = () => {
                 {result.events && (
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Progress</p>
-                    {result.events.map((ev: any, i: number) => (
+                    {result.events.map((ev: TrackingResult["events"][0], i: number) => (
                       <div key={i} className="flex items-center gap-3">
                         <div className={cn('w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0',
                           ev.done ? 'bg-green-100' : 'bg-gray-100'

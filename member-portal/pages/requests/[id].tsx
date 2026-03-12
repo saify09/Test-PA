@@ -1,3 +1,4 @@
+import type { MemberPADetail, PATimelineEvent, MemberDocument } from '../../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -17,7 +18,7 @@ import {
 const RequestDetailPage: NextPage = () => {
   const router = useRouter();
   const { id } = router.query;
-  const [request, setRequest] = useState<any>(null);
+  const [request, setRequest] = useState<MemberPADetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('details');
   const [downloading, setDownloading] = useState(false);
@@ -268,7 +269,7 @@ const RequestDetailPage: NextPage = () => {
           {tab === 'timeline' && (
             <div className="p-5">
               <div className="timeline-track space-y-6">
-                {(request.timeline || []).map((event: any, i: number) => (
+                {(request.timeline || []).map((event: PATimelineEvent, i: number) => (
                   <div key={i} className="relative flex items-start gap-4">
                     <div className={cn('timeline-dot-wrap -left-3.5 top-0',
                       event.type === 'APPROVED' ? 'bg-green-100' :
@@ -298,7 +299,7 @@ const RequestDetailPage: NextPage = () => {
             <div className="p-5 space-y-2">
               {(request.documents || []).length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-6">No documents available</p>
-              ) : (request.documents || []).map((doc: any, i: number) => (
+              ) : (request.documents || []).map((doc: MemberDocument, i: number) => (
                 <div key={i} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
                   <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
                     <span className="text-[9px] font-extrabold text-red-600">PDF</span>

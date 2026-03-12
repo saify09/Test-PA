@@ -1,22 +1,377 @@
-{{/* PA System Helm Templates — deploys all services from values */}}
+{{/*
+PA System — Full Helm Chart Templates
+Covers all 11 services with: Deployment, Service, HPA, PodDisruptionBudget.
+Config injected from values via pa-common-config ConfigMap and pa-secrets Secret.
+*/}}
 
-{{- range $name, $cfg := .Values }}
-{{- if and (kindIs "map" $cfg) (hasKey $cfg "replicas") }}
+{{- $services := list
+  "ai-engine"
+  "intake-service"
+  "payer-integration"
+  "appeals-service"
+  "notification-service"
+  "document-service"
+  "auth-service"
+  "user-management-service"
+  "reporting-service"
+  "eligibility-service"
+  "audit-service"
+-}}
+
+{{- $ports := dict
+  "ai-engine"               8001
+  "intake-service"          8002
+  "payer-integration"       8003
+  "appeals-service"         8004
+  "notification-service"    8005
+  "document-service"        8006
+  "auth-service"            8007
+  "user-management-service" 8008
+  "reporting-service"       8009
+  "eligibility-service"     8010
+  "audit-service"           8011
+-}}
+
+{{- $healthPaths := dict
+  "ai-engine"               "/health"
+  "intake-service"          "/health"
+  "payer-integration"       "/health"
+  "appeals-service"         "/health"
+  "notification-service"    "/health"
+  "document-service"        "/health"
+  "auth-service"            "/health"
+  "user-management-service" "/health"
+  "reporting-service"       "/health"
+  "eligibility-service"     "/health"
+  "audit-service"           "/health"
+-}}
+
+{{- $initialDelays := dict
+  "ai-engine"               45
+  "intake-service"          20
+  "payer-integration"       20
+  "appeals-service"         20
+  "notification-service"    15
+  "document-service"        25
+  "auth-service"            15
+  "user-management-service" 15
+  "reporting-service"       20
+  "eligibility-service"     15
+  "audit-service"           15
+-}}
+
 ---
+# ── ConfigMap: common environment variables ────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pa-common-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+data:
+  ENVIRONMENT:    {{ .Values.global.environment | quote }}
+  LOG_LEVEL:      {{ .Values.global.logLevel | default "INFO" | quote }}
+  KAFKA_SERVERS:  {{ .Values.global.kafkaServers | default "kafka-headless.pa-system.svc.cluster.local:9092" | quote }}
+  REDIS_URL:      {{ .Values.global.redisUrl | default "redis://redis-master.pa-system.svc.cluster.local:6379/0" | quote }}
+  DB_HOST:        {{ .Values.global.dbHost | default "postgres.pa-system.svc.cluster.local" | quote }}
+  DB_PORT:        "5432"
+  DB_NAME:        {{ .Values.global.dbName | default "pa_system" | quote }}
+  AI_ENGINE_URL:  "http://ai-engine.pa-system.svc.cluster.local:8001"
+  AUTH_SERVICE_URL: "http://auth-service.pa-system.svc.cluster.local:8007"
+
+---
+# ── Deployments, Services, HPAs, PDBs — one per service ──────────────────────
+{{- range $name := $services }}
+{{- $port    := index $ports $name | default 8000 }}
+{{- $hp      := index $healthPaths $name | default "/health" }}
+{{- $delay   := index $initialDelays $name | default 20 }}
+{{- $svcVals := index $.Values $name | default dict }}
+{{- $replicas  := $svcVals.replicas | default 1 }}
+{{- $reqCpu    := ($svcVals.resources).requests | default dict | dig "cpu"    "100m" }}
+{{- $reqMem    := ($svcVals.resources).requests | default dict | dig "memory" "256Mi" }}
+{{- $limCpu    := ($svcVals.resources).limits   | default dict | dig "cpu"    "500m" }}
+{{- $limMem    := ($svcVals.resources).limits   | default dict | dig "memory" "512Mi" }}
+
+---
+# Deployment: {{ $name }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ $name }}
-  namespace: pa-system
+  namespace: {{ $.Release.Namespace }}
   labels:
     app: {{ $name }}
-    chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
-    environment: {{ $.Values.global.environment }}
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/version: {{ $.Values.global.imageTag | quote }}
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
+    pa-system/tier: backend
+  annotations:
+    deployment.kubernetes.io/revision: "1"
 spec:
-  replicas: {{ $cfg.replicas }}
+  replicas: {{ $replicas }}
   selector:
     matchLabels:
       app: {{ $name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0           # Zero-downtime deploys
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+        app.kubernetes.io/name: {{ $name }}
+        pa-system/tier: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   {{ $port | quote }}
+        prometheus.io/path:   "/metrics"
+    spec:
+      serviceAccountName: pa-{{ $name }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: {{ $name }}
+        image: "{{ $.Values.global.imageRegistry }}/{{ $name }}:{{ $.Values.global.imageTag }}"
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: {{ $port }}
+          protocol: TCP
+        env:
+        - name: PORT
+          value: {{ $port | quote }}
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pa-secrets
+              key: db-password
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: pa-secrets
+              key: jwt-secret
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: pa-secrets
+              key: phi-encryption-key
+        # SC-006: 90-day JWT key rotation — primary and secondary keys injected
+        # from Kubernetes Secret (populated via External Secrets from AWS Secrets Manager).
+        # Zero-downtime rotation: deploy with new primary + old key as secondary,
+        # then remove secondary after JWT_EXPIRE_MINUTES (15 min) have elapsed.
+        - name: PRIMARY_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: pa-secrets
+              key: jwt-primary-key
+              optional: true    # falls back to JWT_SECRET in dev
+        - name: SECONDARY_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: pa-secrets
+              key: jwt-secondary-key
+              optional: true
+        - name: KEY_VERSION
+          valueFrom:
+            secretKeyRef:
+              name: pa-secrets
+              key: jwt-key-version
+              optional: true
+        envFrom:
+        - configMapRef:
+            name: pa-common-config
+        resources:
+          requests:
+            cpu:    {{ $reqCpu | quote }}
+            memory: {{ $reqMem | quote }}
+          limits:
+            cpu:    {{ $limCpu | quote }}
+            memory: {{ $limMem | quote }}
+        livenessProbe:
+          httpGet:
+            path: {{ $hp }}
+            port: {{ $port }}
+          initialDelaySeconds: {{ $delay }}
+          periodSeconds:       15
+          timeoutSeconds:      5
+          failureThreshold:    3
+        readinessProbe:
+          httpGet:
+            path: {{ $hp }}
+            port: {{ $port }}
+          initialDelaySeconds: {{ div $delay 2 }}
+          periodSeconds:       10
+          timeoutSeconds:      3
+          successThreshold:    1
+          failureThreshold:    3
+        startupProbe:
+          httpGet:
+            path: {{ $hp }}
+            port: {{ $port }}
+          initialDelaySeconds: 5
+          periodSeconds:       5
+          failureThreshold:    24   # Allow up to 120s for startup
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem:    true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: app-logs
+          mountPath: /app/logs
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: app-logs
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values: [{{ $name }}]
+              topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: {{ $name }}
+
+---
+# Service: {{ $name }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $name }}
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ $name }}
+  ports:
+  - name: http
+    port: 80
+    targetPort: {{ $port }}
+    protocol: TCP
+
+---
+# HorizontalPodAutoscaler: {{ $name }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}-hpa
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $name }}
+    app.kubernetes.io/managed-by: Helm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}
+  minReplicas: {{ $replicas }}
+  maxReplicas: {{ mul $replicas 4 | max 4 }}
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type:               Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type:               Utilization
+        averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type:          Pods
+        value:         2
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type:          Pods
+        value:         1
+        periodSeconds: 120
+
+---
+# PodDisruptionBudget: {{ $name }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}-pdb
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $name }}
+    app.kubernetes.io/managed-by: Helm
+spec:
+  {{- if ge $replicas 2 }}
+  minAvailable: 1
+  {{- else }}
+  maxUnavailable: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+
+{{- end }}{{/* end range $services */}}
+
+---
+# ── Frontends (Next.js portals) ───────────────────────────────────────────────
+{{- $frontends := dict
+  "provider-portal"    3000
+  "reviewer-workbench" 3001
+  "member-portal"      3002
+  "admin-dashboard"    3003
+-}}
+
+{{- range $fname, $fport := $frontends }}
+{{- $fVals    := index $.Values $fname | default dict }}
+{{- $fReplicas := $fVals.replicas | default 1 }}
+{{- $freqCpu   := ($fVals.resources).requests | default dict | dig "cpu"    "100m" }}
+{{- $freqMem   := ($fVals.resources).requests | default dict | dig "memory" "256Mi" }}
+{{- $flimCpu   := ($fVals.resources).limits   | default dict | dig "cpu"    "500m" }}
+{{- $flimMem   := ($fVals.resources).limits   | default dict | dig "memory" "512Mi" }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fname }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $fname }}
+    pa-system/tier: frontend
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: {{ $fReplicas }}
+  selector:
+    matchLabels:
+      app: {{ $fname }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -25,41 +380,111 @@ spec:
   template:
     metadata:
       labels:
-        app: {{ $name }}
-        version: {{ $.Values.global.imageTag }}
+        app: {{ $fname }}
+        pa-system/tier: frontend
     spec:
-      serviceAccountName: pa-backend-sa
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1001
+        runAsUser: 1000
       containers:
-      - name: {{ $name }}
-        image: "{{ $.Values.global.imageRegistry }}/{{ $name }}:{{ $.Values.global.imageTag }}"
+      - name: {{ $fname }}
+        image: "{{ $.Values.global.imageRegistry }}/{{ $fname }}:{{ $.Values.global.imageTag }}"
         imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: {{ $fport }}
+        env:
+        - name: PORT
+          value: {{ $fport | quote }}
+        - name: NEXT_PUBLIC_API_URL
+          value: "https://api.pa-system.health"
         envFrom:
         - configMapRef:
             name: pa-common-config
-        - secretRef:
-            name: pa-secrets
         resources:
-          {{- toYaml $cfg.resources | nindent 10 }}
-        {{- if hasKey $cfg "canary" }}
-        {{- if $cfg.canary.enabled }}
-        # Canary deployment label
-        {{- end }}
-        {{- end }}
+          requests:
+            cpu:    {{ $freqCpu | quote }}
+            memory: {{ $freqMem | quote }}
+          limits:
+            cpu:    {{ $flimCpu | quote }}
+            memory: {{ $flimMem | quote }}
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: {{ $fport }}
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: {{ $fport }}
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false   # Next.js needs write access to .next cache
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ $name }}
-  namespace: pa-system
+  name: {{ $fname }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $fname }}
+    app.kubernetes.io/managed-by: Helm
 spec:
+  type: ClusterIP
   selector:
-    app: {{ $name }}
+    app: {{ $fname }}
   ports:
-  - port: 80
-    targetPort: 8080
-    name: http
-{{- end }}
-{{- end }}
+  - name: http
+    port: 80
+    targetPort: {{ $fport }}
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $fname }}-pdb
+  namespace: {{ $.Release.Namespace }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: {{ $fname }}
+
+{{- end }}{{/* end range frontends */}}
+
+---
+# ── Secrets placeholder (values replaced by CI/CD pipeline or Vault) ──────────
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pa-secrets
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    helm.sh/resource-policy: keep   # Don't delete secrets on helm uninstall
+type: Opaque
+data:
+  db-password:        ""   # base64 — set by CI/CD: echo -n 'value' | base64
+  jwt-secret:         ""
+  phi-encryption-key: ""
+  uhc-client-secret:  ""
+  aetna-client-secret: ""
+  cvs-api-secret:     ""
+  cigna-client-secret: ""
+  humana-api-key:     ""

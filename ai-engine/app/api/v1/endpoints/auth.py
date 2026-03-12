@@ -1,100 +1,186 @@
-"""Auth endpoints — login, logout, refresh, me."""
+"""
+AI Engine auth endpoints — SC-001, NFR-101, NFR-104
+Proxies authentication to the centralised auth-service (port 8007).
+
+MFA enforcement (SC-001 / NFR-101):
+  Roles REVIEWER_RN, MEDICAL_DIRECTOR, SUPER_ADMIN, OPS_ADMIN require a valid
+  TOTP code on every login. Requests without mfa_code receive:
+    HTTP 401 {"error": "MFA_REQUIRED", "mfa_required": true}
+
+Session lifetime (NFR-104): 15 minutes (settings.JWT_EXPIRE_MINUTES = 15).
+"""
 from __future__ import annotations
-from datetime import timedelta
-import uuid
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
-from app.core.security import verify_password, hash_password, create_access_token, create_refresh_token, verify_token
-from app.core.redis_client import cache_set, cache_delete
-from app.api.deps import get_current_user, get_client_ip
-from app.core.config import settings
+
+import os
+from typing import Any, Dict, Optional
+
+import httpx
 import structlog
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel
+
+from app.core.security import (
+    MFA_REQUIRED_ROLES,
+    totp_new_secret,
+    totp_provisioning_uri,
+    generate_backup_codes,
+    verify_token,
+)
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
+bearer_scheme = HTTPBearer(auto_error=False)
+
+AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://auth-service:8007")
 
 
+# ── Dependency ───────────────────────────────────────────────────────────────
+async def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+) -> Dict[str, Any]:
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    payload = verify_token(credentials.credentials)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return payload
+
+
+async def require_role(*roles: str):
+    """RBAC factory — SC-007 minimum necessary access."""
+    async def checker(current_user: dict = Depends(get_current_user)) -> dict:
+        user_role = current_user.get("role", "")
+        if user_role not in roles and user_role != "SUPER_ADMIN":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Role '{user_role}' not permitted for this resource",
+            )
+        return current_user
+    return checker
+
+
+# ── Schemas ──────────────────────────────────────────────────────────────────
 class LoginRequest(BaseModel):
     username: str
     password: str
+    mfa_code: Optional[str] = None  # required for MFA_REQUIRED_ROLES
 
-class LoginResponse(BaseModel):
-    access_token: str
+
+class RefreshRequest(BaseModel):
     refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int = settings.JWT_EXPIRE_MINUTES * 60
 
 
-# Hardcoded demo users — in production these come from the users DB
-DEMO_USERS = {
-    "provider1": {"id": "u1", "role": "PROVIDER",     "name": "Dr. John Smith",   "pw_hash": hash_password("Provider@1234")},
-    "reviewer1": {"id": "u2", "role": "REVIEWER_RN",  "name": "Sarah Parker RN",  "pw_hash": hash_password("Review@1234")},
-    "meddir1":   {"id": "u3", "role": "MEDICAL_DIRECTOR","name": "Dr. Robert Chen","pw_hash": hash_password("Doctor@1234")},
-    "admin":     {"id": "u4", "role": "SUPER_ADMIN",  "name": "System Admin",     "pw_hash": hash_password("Admin@1234")},
-    "member1":   {"id": "u5", "role": "MEMBER",       "name": "Sarah Johnson",    "pw_hash": hash_password("Member@1234")},
-}
+class ForgotPasswordRequest(BaseModel):
+    email: str
 
 
-@router.post("/login", response_model=LoginResponse)
-async def login(body: LoginRequest, request: Request):
-    user = DEMO_USERS.get(body.username)
-    if not user or not verify_password(body.password, user["pw_hash"]):
-        log.warning("auth.login_failed", username=body.username, ip=get_client_ip(request))
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    jti = str(uuid.uuid4())
-    token_data = {"sub": user["id"], "name": user["name"], "role": user["role"],
-                  "username": body.username, "jti": jti}
-    access_token  = create_access_token(token_data)
-    refresh_token = create_refresh_token(token_data)
-
-    log.info("auth.login_success", username=body.username, role=user["role"], ip=get_client_ip(request))
-    return LoginResponse(access_token=access_token, refresh_token=refresh_token)
+class MFAConfirmRequest(BaseModel):
+    totp_code: str
 
 
-@router.post("/admin/login", response_model=LoginResponse)
-async def admin_login(body: LoginRequest, request: Request):
-    """Admin-portal login — requires ADMIN or higher role."""
-    user = DEMO_USERS.get(body.username)
-    if not user or not verify_password(body.password, user["pw_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    if user["role"] not in ("SUPER_ADMIN", "ADMIN", "OPS_ADMIN"):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    jti = str(uuid.uuid4())
-    token_data = {"sub": user["id"], "name": user["name"], "role": user["role"], "jti": jti}
-    return LoginResponse(
-        access_token=create_access_token(token_data),
-        refresh_token=create_refresh_token(token_data)
-    )
+# ── Proxy helper ─────────────────────────────────────────────────────────────
+async def _proxy(method: str, path: str,
+                 json: Optional[dict] = None,
+                 headers: Optional[dict] = None) -> dict:
+    url = f"{AUTH_SERVICE_URL}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await getattr(client, method)(url, json=json, headers=headers or {})
+        if resp.status_code >= 400:
+            try:
+                detail = resp.json()
+            except Exception:
+                detail = resp.text
+            raise HTTPException(status_code=resp.status_code, detail=detail)
+        return resp.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.error("auth.proxy_error", path=path, error=str(exc))
+        raise HTTPException(status_code=503, detail="Auth service unavailable")
 
 
-@router.post("/refresh")
-async def refresh(body: dict):
-    token = body.get("refresh_token")
-    if not token:
-        raise HTTPException(status_code=400, detail="refresh_token required")
-    payload = verify_token(token)
-    if not payload or payload.get("type") != "refresh":
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
-    jti = str(uuid.uuid4())
-    new_payload = {k: v for k, v in payload.items() if k not in ("exp", "iat", "type", "jti")}
-    new_payload["jti"] = jti
-    return {"access_token": create_access_token(new_payload), "token_type": "bearer"}
+# ── Routes ───────────────────────────────────────────────────────────────────
+@router.post("/auth/login")
+async def login(request: LoginRequest, req: Request):
+    """
+    SC-001 / NFR-101: Login with username + password [+ TOTP].
+    Privileged roles (MFA_REQUIRED_ROLES) must supply mfa_code.
+    Returns 401 {error: MFA_REQUIRED} when code is missing.
+    """
+    log.info("auth.login_attempt", username=request.username,
+             ip=req.client.host if req.client else "unknown")
+    return await _proxy("post", "/auth/login", json=request.model_dump())
 
 
-@router.post("/logout")
-async def logout(current_user: dict = Depends(get_current_user)):
-    jti = current_user.get("jti")
-    if jti:
-        await cache_set(f"revoked_token:{jti}", "1", ttl=settings.SESSION_TTL_SECONDS)
-    return {"detail": "Logged out"}
+@router.post("/auth/refresh")
+async def refresh(request: RefreshRequest):
+    """NFR-104: Rotate refresh token → new 15-min access token."""
+    return await _proxy("post", "/auth/refresh", json=request.model_dump())
 
 
-@router.get("/me")
-async def me(current_user: dict = Depends(get_current_user)):
+@router.post("/auth/logout")
+async def logout(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+):
+    """Revoke access token (jti deny-listed in Redis)."""
+    hdrs = {"Authorization": f"Bearer {credentials.credentials}"} if credentials else {}
+    return await _proxy("post", "/auth/logout", headers=hdrs)
+
+
+@router.get("/auth/me")
+async def me(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+):
+    """Return current user profile: role, permissions, mfa_enabled."""
+    hdrs = {"Authorization": f"Bearer {credentials.credentials}"} if credentials else {}
+    return await _proxy("get", "/auth/me", headers=hdrs)
+
+
+@router.post("/auth/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    """Anti-enumeration password reset (SC-007). Always returns 200."""
+    return await _proxy("post", "/auth/forgot-password", json={"email": request.email})
+
+
+@router.post("/auth/mfa/setup")
+async def mfa_setup(current_user: dict = Depends(get_current_user)):
+    """
+    SC-001 enrolment step 1: Generate TOTP secret + QR provisioning URI.
+    Secret is not active until /auth/mfa/enable is called with a valid code.
+    """
+    username = current_user.get("username", current_user.get("sub", "user"))
+    secret   = totp_new_secret()
+    uri      = totp_provisioning_uri(secret, username)
+    codes    = generate_backup_codes(10)
+    log.info("auth.mfa.setup", user_id=current_user.get("sub"),
+             role=current_user.get("role"))
     return {
-        "id": current_user.get("sub"),
-        "name": current_user.get("name"),
-        "role": current_user.get("role"),
-        "username": current_user.get("username"),
+        "secret":           secret,
+        "provisioning_uri": uri,
+        "backup_codes":     codes,
+        "instructions": (
+            "1. Scan this QR code (or enter secret) in Google Authenticator / Authy. "
+            "2. Call POST /auth/mfa/enable with a 6-digit code to activate MFA. "
+            "3. Keep backup codes safe — they cannot be recovered later."
+        ),
     }
+
+
+@router.post("/auth/mfa/enable")
+async def mfa_enable(
+    request: MFAConfirmRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """SC-001 enrolment step 2: Confirm TOTP and activate MFA for this account."""
+    return await _proxy("post", "/auth/mfa/enable", json={"totp_code": request.totp_code})
+
+
+@router.post("/auth/mfa/verify")
+async def mfa_verify(
+    request: MFAConfirmRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Step-up TOTP verify — used before high-risk actions (e.g. MD denial co-sign)."""
+    return await _proxy("post", "/auth/mfa/verify", json={"totp_code": request.totp_code})

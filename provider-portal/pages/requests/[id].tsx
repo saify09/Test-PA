@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import type { PARequest, PAHistoryEvent, PADocument } from '../../lib/types';
 import type { NextPage } from 'next';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
@@ -16,8 +17,8 @@ import {
 const PADetailPage: NextPage = () => {
   const router = useRouter();
   const { id } = router.query;
-  const [pa, setPA] = useState<any>(null);
-  const [history, setHistory] = useState<any[]>([]);
+  const [pa, setPA] = useState<PARequest | null>(null);
+  const [history, setHistory] = useState<PAHistoryEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('summary');
   const [downloading, setDownloading] = useState(false);
@@ -300,7 +301,7 @@ const PADetailPage: NextPage = () => {
               <p className="text-sm text-gray-400 text-center py-8">No documents submitted</p>
             ) : (
               <div className="space-y-2">
-                {pa.documents.map((doc: any, i: number) => (
+                {pa.documents.map((doc: PADocument, i: number) => (
                   <div key={i} className="flex items-center gap-3 p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors">
                     <FileText size={16} className="text-primary-500 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
@@ -351,7 +352,7 @@ const PADetailPage: NextPage = () => {
                       { label: 'MCG Imaging Guidelines - Criteria A met', met: true },
                       { label: 'Step therapy requirements satisfied', met: pa.ai_recommendation !== 'DENY' },
                       { label: 'Documentation completeness ≥95%', met: pa.ai_score >= 80 },
-                    ]).map((c: any, i: number) => (
+                    ]).map((c: { label: string; met: boolean }, i: number) => (
                       <div key={i} className="flex items-center gap-2.5 p-2 rounded-lg bg-gray-50">
                         {c.met ? (
                           <CheckCircle size={14} className="text-green-500 flex-shrink-0" />

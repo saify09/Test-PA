@@ -243,17 +243,33 @@ class DocumentExtractionRequest(BaseModel):
 
 
 class DocumentExtractionResult(BaseModel):
-    document_id:      str
-    pa_number:        str
-    raw_text:         str
-    extracted_fields: Dict[str, Any]
-    diagnoses_found:  List[str]
-    procedures_found: List[str]
-    medications_found:List[str]
-    lab_values:       Dict[str, Any]
-    confidence:       float
-    ocr_required:     bool
-    processing_ms:    float
+    document_id:           str
+    # Legacy fields (backward compat)
+    pa_number:             Optional[str] = None
+    raw_text:              Optional[str] = None
+    extracted_fields:      Optional[Dict[str, Any]] = None
+    diagnoses_found:       Optional[List[str]] = None
+    procedures_found:      Optional[List[str]] = None
+    medications_found:     Optional[List[str]] = None
+    lab_values:            Optional[Dict[str, Any]] = None
+    confidence:            Optional[float] = None
+    ocr_required:          Optional[bool] = None
+    # New fields from NLPExtractor v2
+    icd10_codes:           Optional[List[str]] = None
+    cpt_codes:             Optional[List[str]] = None
+    ndc_codes:             Optional[List[str]] = None
+    drug_names:            Optional[List[str]] = None
+    conditions:            Optional[List[str]] = None
+    lab_results:           Optional[List[Dict[str, Any]]] = None
+    prior_treatments:      Optional[List[str]] = None
+    chief_complaint:       Optional[str] = None
+    word_count:            Optional[int] = None
+    has_clinical_summary:  Optional[bool] = None
+    has_lab_results:       Optional[bool] = None
+    has_prior_treatments:  Optional[bool] = None
+    extraction_confidence: Optional[float] = None
+    model_used:            Optional[str] = None
+    processing_ms:         float = 0.0
 
 
 # ── FHIR R4 mapping helpers ───────────────────────────────────────────────────

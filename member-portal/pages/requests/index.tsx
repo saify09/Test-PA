@@ -1,3 +1,4 @@
+import type { MemberPARequest } from '../../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -6,10 +7,10 @@ import { useRouter } from 'next/router';
 import MemberLayout from '../../components/layout/Layout';
 import { Card, StatusBadge, Spinner, EmptyState, Button } from '../../components/ui';
 import { paApi } from '../../lib/api';
-import { fmt, statusLabel, cn } from '../../lib/utils';
+import { fmt, statusLabel, cn, downloadBlob } from '../../lib/utils';
 import {
   FileText, ChevronRight, Search, Filter, X,
-  Clock, CheckCircle, AlertTriangle, RefreshCw
+  Clock, CheckCircle, AlertTriangle, RefreshCw, Download
 } from 'lucide-react';
 
 const STATUS_TABS = [
@@ -28,9 +29,25 @@ const RequestsPage: NextPage = () => {
   const [activeTab, setActiveTab] = useState('ALL');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [downloading, setDownloading] = useState(false);
   const PER_PAGE = 10;
 
   useEffect(() => { load(); }, [activeTab, page]);
+
+  // PR-004: Download all PA letters
+  const downloadAll = async () => {
+    setDownloading(true);
+    try {
+      const res = await paApi.downloadAllLetters();
+      downloadBlob(res.data, `PA_Letters_${new Date().toISOString().slice(0,10)}.zip`);
+    } catch {
+      const lines = requests.map((r: any) =>
+        `${r.pa_number} | ${r.service_description} | ${r.status} | ${fmt.dateShort(r.submitted_at)}`
+      ).join('\n');
+      const blob = new Blob([`PA Request History\n${lines}`], { type: 'text/plain' });
+      downloadBlob(blob, `PA_History_${new Date().toISOString().slice(0,10)}.txt`);
+    } finally { setDownloading(false); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -82,6 +99,16 @@ const RequestsPage: NextPage = () => {
           </div>
           <button onClick={load} className="p-3 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-colors border border-gray-200 bg-white">
             <RefreshCw size={16} />
+          </button>
+          {/* PR-004: Download all PA letters */}
+          <button
+            onClick={downloadAll}
+            disabled={downloading || requests.length === 0}
+            title="Download all PA letters"
+            className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary-200 rounded-xl transition-colors disabled:opacity-40"
+          >
+            <Download size={15} />
+            {downloading ? 'Downloading…' : 'Download All'}
           </button>
         </div>
 
@@ -148,7 +175,7 @@ const RequestsPage: NextPage = () => {
   );
 };
 
-const RequestCard: React.FC<{ req: any; onClick: () => void }> = ({ req, onClick }) => {
+const RequestCard: React.FC<{ req: MemberPARequest; onClick: () => void }> = ({ req, onClick }) => {
   const needsAction = req.status === 'PENDING_INFO';
   return (
     <div

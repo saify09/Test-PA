@@ -1,3 +1,4 @@
+import type { AdminKPIs } from '../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -17,7 +18,7 @@ const RANGES = ['7d', '30d', '90d', '6m', '1y'];
 const AnalyticsPage: NextPage = () => {
   const [range, setRange]   = useState('30d');
   const [tab, setTab]       = useState('overview');
-  const [kpis, setKpis]     = useState<any>(null);
+  const [kpis, setKpis]     = useState<AdminKPIs | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
@@ -153,7 +154,7 @@ const AnalyticsPage: NextPage = () => {
                           dataKey="value" nameKey="name" paddingAngle={3}>
                           {decisionPie.map((e, i) => <Cell key={i} fill={e.color} />)}
                         </Pie>
-                        <Tooltip formatter={(v: any) => `${v.toFixed(1)}%`} contentStyle={{ background:'#1e293b', border:'none', borderRadius:'8px', color:'#f8fafc', fontSize:'12px' }} />
+                        <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} contentStyle={{ background:'#1e293b', border:'none', borderRadius:'8px', color:'#f8fafc', fontSize:'12px' }} />
                         <Legend wrapperStyle={{ fontSize:11 }} />
                       </PieChart>
                     </div>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import type { Appeal } from '../lib/types';
 import type { NextPage } from 'next';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
@@ -10,7 +11,7 @@ import { AlertTriangle, Clock, CheckCircle, XCircle, ChevronRight, FilePlus2 } f
 
 const AppealsPage: NextPage = () => {
   const router = useRouter();
-  const [appeals, setAppeals] = useState<any[]>([]);
+  const [appeals, setAppeals] = useState<Appeal[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

@@ -1,3 +1,4 @@
+import type { SystemHealth, ServiceStatus, QueueStatus } from '../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -11,7 +12,7 @@ import { subMinutes, format } from 'date-fns';
 
 const SystemPage: NextPage = () => {
   const [tab, setTab]       = useState('overview');
-  const [health, setHealth] = useState<any>(null);
+  const [health, setHealth] = useState<SystemHealth | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
@@ -99,7 +100,7 @@ const SystemPage: NextPage = () => {
 
             {tab === 'services' && (
               <div className="space-y-3">
-                {h.services.map((svc: any) => (
+                {h.services.map((svc: ServiceStatus) => (
                   <div key={svc.name} className={cn('p-4 rounded-xl border', svc.status==='healthy'?'border-slate-200':'border-amber-300 bg-amber-50/40')}>
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
@@ -176,7 +177,7 @@ const SystemPage: NextPage = () => {
 
             {tab === 'queues' && (
               <div className="space-y-3">
-                {(h.queues || []).map((q: any) => (
+                {(h.queues || []).map((q: QueueStatus) => (
                   <div key={q.name} className="flex items-center justify-between p-4 rounded-xl border border-slate-200 hover:bg-slate-50">
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center">
@@ -214,7 +215,7 @@ const SystemPage: NextPage = () => {
                     <CheckCircle size={32} className="text-green-400 mx-auto mb-2" />
                     <p className="text-sm font-semibold text-slate-500">No active incidents</p>
                   </div>
-                ) : (h.incidents || []).map((inc: any, i: number) => (
+                ) : (h.incidents || []).map((inc: { id: string; title: string; started_at: string; resolved_at?: string }, i: number) => (
                   <div key={i} className={cn('p-4 rounded-xl border', inc.severity==='HIGH'?'border-red-300 bg-red-50':'border-amber-300 bg-amber-50')}>
                     <div className="flex items-start justify-between gap-2">
                       <div>

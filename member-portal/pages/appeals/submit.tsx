@@ -1,3 +1,4 @@
+import type { MemberPARequest } from '../../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -31,7 +32,7 @@ const AppealSubmitPage: NextPage = () => {
 
   // Form state
   const [paNumber,           setPaNumber]           = useState('');
-  const [originalPaInfo,     setOriginalPaInfo]     = useState<any>(null);
+  const [originalPaInfo,     setOriginalPaInfo]     = useState<MemberPARequest | null>(null);
   const [appealType,         setAppealType]         = useState(expeditedParam === 'true' ? 'EXPEDITED' : 'STANDARD');
   const [expeditedJustification, setExpeditedJustification] = useState('');
   const [reasonForAppeal,    setReasonForAppeal]    = useState('');

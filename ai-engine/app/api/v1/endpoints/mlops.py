@@ -457,7 +457,7 @@ async def _deliver_webhook(webhook_id: str, event: WebhookEvent, max_retries: in
     payload_str = json.dumps(event.dict())
     signature = hmac.new(
         webhook["secret"].encode(), payload_str.encode(), hashlib.sha256
-    ).hexdigest()
+    ).hexdigest()  # hmac.new() is valid Python 3 (alias for hmac.HMAC)
 
     for attempt in range(max_retries):
         try:

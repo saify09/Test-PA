@@ -1,3 +1,4 @@
+import type { CaseData, AIAnalysis, Guidelines, CaseHistoryEvent, ReviewDocument } from '../../lib/types';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -62,11 +63,11 @@ const CaseReviewPage: NextPage = () => {
   const notesRef = useRef<HTMLTextAreaElement>(null);
 
   // Data
-  const [caseData, setCaseData] = useState<any>(null);
-  const [aiAnalysis, setAiAnalysis] = useState<any>(null);
-  const [guidelines, setGuidelines] = useState<any>(null);
-  const [history, setHistory] = useState<any[]>([]);
-  const [documents, setDocuments] = useState<any[]>([]);
+  const [caseData, setCaseData] = useState<CaseData | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
+  const [guidelines, setGuidelines] = useState<Guidelines | null>(null);
+  const [history, setHistory] = useState<CaseHistoryEvent[]>([]);
+  const [documents, setDocuments] = useState<ReviewDocument[]>([]);
   const [loading, setLoading] = useState(true);
 
   // UI state
@@ -389,7 +390,7 @@ const CaseReviewPage: NextPage = () => {
                   <p className="text-sm text-slate-700 leading-relaxed">{c.prior_treatments}</p>
                   {ai?.treatment_timeline && (
                     <div className="mt-4 relative pl-5 border-l-2 border-slate-200 space-y-3">
-                      {ai.treatment_timeline.map((t: any, i: number) => (
+                      {ai.treatment_timeline.map((t: import('../../lib/types').TimelineItem, i: number) => (
                         <div key={i} className="relative">
                           <div className="absolute -left-[21px] w-3 h-3 rounded-full bg-slate-300 border-2 border-white" />
                           <p className="text-xs text-slate-400">{t.date}</p>
@@ -465,7 +466,7 @@ const CaseReviewPage: NextPage = () => {
                       <div>
                         <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">✓ Criteria Met</p>
                         <div className="space-y-1.5">
-                          {(ai?.criteria_met || mockCriteriaMet()).map((c: any, i: number) => (
+                          {(ai?.criteria_met || mockCriteriaMet()).map((c: import('../../lib/types').CriteriaItem, i: number) => (
                             <CriteriaItem key={i} met={true} label={c.label} detail={c.detail} />
                           ))}
                         </div>
@@ -474,7 +475,7 @@ const CaseReviewPage: NextPage = () => {
                         <div>
                           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">✗ Criteria Not Met</p>
                           <div className="space-y-1.5">
-                            {ai.criteria_unmet.map((c: any, i: number) => (
+                            {ai.criteria_unmet.map((c: import('../../lib/types').CriteriaItem, i: number) => (
                               <CriteriaItem key={i} met={false} label={c.label} detail={c.detail} />
                             ))}
                           </div>
@@ -484,7 +485,7 @@ const CaseReviewPage: NextPage = () => {
                         <div>
                           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">— Not Applicable</p>
                           <div className="space-y-1.5">
-                            {ai.criteria_na.map((c: any, i: number) => (
+                            {ai.criteria_na.map((c: import('../../lib/types').CriteriaItem, i: number) => (
                               <CriteriaItem key={i} met={null} label={c.label} />
                             ))}
                           </div>
@@ -554,7 +555,7 @@ const CaseReviewPage: NextPage = () => {
                 {ai?.supporting_evidence && (
                   <Card title="Supporting Evidence Citations">
                     <div className="space-y-2">
-                      {ai.supporting_evidence.map((e: any, i: number) => (
+                      {ai.supporting_evidence.map((e: import('../../lib/types').EvidenceItem, i: number) => (
                         <div key={i} className="flex items-start gap-2.5 p-2.5 bg-blue-50 rounded-lg border border-blue-100">
                           <BookOpen size={13} className="text-blue-500 flex-shrink-0 mt-0.5" />
                           <div>
@@ -588,7 +589,7 @@ const CaseReviewPage: NextPage = () => {
                         Must Meet ALL (Required Criteria)
                       </p>
                       <div className="space-y-2">
-                        {(guidelines?.must_meet || mockMustMeet()).map((item: any, i: number) => (
+                        {(guidelines?.must_meet || mockMustMeet()).map((item: import('../../lib/types').GuidelineCriteria, i: number) => (
                           <div key={i} className={cn('criteria-item', item.status === 'MET' ? 'met' : item.status === 'UNMET' ? 'unmet' : 'na')}>
                             {item.status === 'MET' ? <CheckCircle size={13} className="text-green-600 flex-shrink-0 mt-0.5" /> :
                              item.status === 'UNMET' ? <XCircle size={13} className="text-red-600 flex-shrink-0 mt-0.5" /> :
@@ -610,7 +611,7 @@ const CaseReviewPage: NextPage = () => {
                         Should Meet (Any of the Following)
                       </p>
                       <div className="space-y-2">
-                        {(guidelines?.should_meet || mockShouldMeet()).map((item: any, i: number) => (
+                        {(guidelines?.should_meet || mockShouldMeet()).map((item: import('../../lib/types').GuidelineCriteria, i: number) => (
                           <div key={i} className={cn('criteria-item', item.status === 'MET' ? 'met' : 'na')}>
                             {item.status === 'MET' ? <CheckCircle size={13} className="text-green-600 flex-shrink-0" /> : <Minus size={13} className="text-slate-400 flex-shrink-0" />}
                             <p className="text-xs">{item.label}</p>
@@ -626,7 +627,7 @@ const CaseReviewPage: NextPage = () => {
                         Exclusion Criteria (Red Flags)
                       </p>
                       <div className="space-y-2">
-                        {(guidelines?.exclusions || mockExclusions()).map((item: any, i: number) => (
+                        {(guidelines?.exclusions || mockExclusions()).map((item: import('../../lib/types').GuidelineCriteria, i: number) => (
                           <div key={i} className={cn('criteria-item', item.present ? 'unmet' : 'met')}>
                             {item.present ? <XCircle size={13} className="text-red-600 flex-shrink-0" /> : <CheckCircle size={13} className="text-green-600 flex-shrink-0" />}
                             <p className="text-xs">{item.label} — <span className="font-semibold">{item.present ? 'PRESENT' : 'Not Present'}</span></p>

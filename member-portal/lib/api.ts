@@ -51,6 +51,10 @@ export const paApi = {
 
   downloadLetter: (pa_id: string) =>
     api.get(`/api/v1/member/pa-requests/${pa_id}/letter`, { responseType: 'blob' }),
+
+  // PR-004: Download all PA letters as ZIP (member data portability)
+  downloadAllLetters: () =>
+    api.get('/api/v1/member/pa-requests/letters/download-all', { responseType: 'blob' }),
 };
 
 // ─── Appeals ──────────────────────────────────────────────────────────────

@@ -159,12 +159,55 @@ class CriteriaEngine:
         """
         Main entry point: given a PA submission, return a full AI recommendation.
         Target: <5 seconds inference time (TR-204).
+
+        INT-301/302: Fetches live clinical criteria from MCG + InterQual APIs
+        (with Redis caching and automatic fallback to embedded rule base).
+        INT-303: CMS NCD/LCD coverage checked for CPT code.
         """
         t0 = time.perf_counter()
 
         # 1. Select applicable guideline set
         guideline_key = cls._map_service_type(submission.service_type)
-        criteria_defs = GUIDELINES.get(guideline_key, GUIDELINES["DEFAULT"])
+
+        # INT-301 / INT-302: Try external guideline APIs first; fall back to embedded rules
+        try:
+            from app.services.guidelines_client import GuidelinesClient
+            gl_result = await GuidelinesClient.get_criteria(
+                service_type=guideline_key,
+                icd10_code=submission.primary_diagnosis.code if submission.primary_diagnosis else "",
+                cpt_code=submission.primary_procedure.code if submission.primary_procedure else "",
+            )
+            # Convert CriterionSpec → internal guideline dict format
+            criteria_defs = [
+                {
+                    "id":       c.criterion_id,
+                    "name":     c.name,
+                    "source":   c.source,
+                    "required": c.required,
+                    "weight":   c.weight,
+                    "keywords": c.keywords,
+                }
+                for c in gl_result.criteria
+            ] if gl_result.criteria else []
+
+            # INT-303: CMS coverage check
+            cpt = submission.primary_procedure.code if submission.primary_procedure else ""
+            if cpt:
+                cms = await GuidelinesClient.check_cms_coverage(
+                    cpt, submission.primary_diagnosis.code if submission.primary_diagnosis else ""
+                )
+                if cms.get("covered") is False:
+                    log.warning("criteria_engine.cms_not_covered",
+                                cpt=cpt, ncd=cms.get("ncd"))
+
+            if not criteria_defs:
+                raise ValueError("empty criteria from API")
+            log.info("criteria_engine.using_live_guidelines",
+                     source=gl_result.source, count=len(criteria_defs),
+                     latency_ms=gl_result.latency_ms)
+        except Exception as exc:
+            log.debug("criteria_engine.using_embedded_guidelines", reason=str(exc))
+            criteria_defs = GUIDELINES.get(guideline_key, GUIDELINES["DEFAULT"])
 
         # 2. Evaluate each criterion against clinical text
         clinical_text = cls._build_clinical_text(submission)

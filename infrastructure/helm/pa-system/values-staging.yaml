@@ -73,3 +73,34 @@ ingress:
     member:    member.staging.pa-system.health
     admin:     admin.staging.pa-system.health
     api:       api.staging.pa-system.health
+
+# ── Backend services (auth, user mgmt, reporting, eligibility, audit) ────────
+auth-service:
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "250m", memory: "256Mi" }
+
+user-management-service:
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "250m", memory: "256Mi" }
+
+reporting-service:
+  replicas: 1
+  resources:
+    requests: { cpu: "150m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+
+eligibility-service:
+  replicas: 1
+  resources:
+    requests: { cpu: "150m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+
+audit-service:
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "250m", memory: "256Mi" }

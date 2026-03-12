@@ -1,3 +1,4 @@
+import type { AdminCase } from '../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -25,8 +26,8 @@ const CasesPage: NextPage = () => {
   const [payer, setPayer]         = useState('ALL');
   const [page, setPage]           = useState(1);
   const [selected, setSelected]   = useState<Set<string>>(new Set());
-  const [detailCase, setDetailCase] = useState<any>(null);
-  const [reassignModal, setReassignModal] = useState<any>(null);
+  const [detailCase, setDetailCase] = useState<AdminCase | null>(null);
+  const [reassignModal, setReassignModal] = useState<AdminCase | null>(null);
   const [exporting, setExporting] = useState(false);
   const PER_PAGE = 20;
 

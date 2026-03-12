@@ -37,7 +37,7 @@ const SettingsPage: NextPage = () => {
   const [auditRetention, setAuditRetention]  = useState(6);
   const [encryptAtRest,  setEncryptAtRest]   = useState(true);
 
-  const save = async (key: string, value: any) => {
+  const save = async (key: string, value: string | number | boolean) => {
     setSaving(true);
     try {
       await systemApi.updateConfig(key, value);

@@ -82,3 +82,44 @@ ingress:
     member:    member.pa-system.health
     admin:     admin.pa-system.health
     api:       api.pa-system.health
+
+# ── Backend services (auth, user mgmt, reporting, eligibility, audit) ────────
+# These were missing from the initial values file — added in session 3 (SC-006/audit).
+
+auth-service:
+  replicas: 2
+  resources:
+    requests: { cpu: "150m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+  # SC-006: inject rotation keys from AWS Secrets Manager via ExternalSecret
+  env:
+    PRIMARY_SECRET_KEY:   ""   # set via secretRef: pa-system/jwt-primary-key
+    SECONDARY_SECRET_KEY: ""   # set via secretRef: pa-system/jwt-secondary-key
+    KEY_VERSION:          "1"  # incremented on every 90-day rotation
+
+user-management-service:
+  replicas: 2
+  resources:
+    requests: { cpu: "150m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+
+reporting-service:
+  replicas: 2
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits:   { cpu: "1000m", memory: "1Gi" }
+
+eligibility-service:
+  replicas: 2
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits:   { cpu: "1000m", memory: "1Gi" }
+
+audit-service:
+  replicas: 2   # HIPAA: audit service runs >=2 replicas — no single point of failure
+  resources:
+    requests: { cpu: "150m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+  # Audit logs are append-only — point to dedicated read-replica for audit queries
+  env:
+    DATABASE_READ_REPLICA_URL: ""   # set per environment

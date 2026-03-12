@@ -1,3 +1,4 @@
+import type { QueueMetrics, ReviewerMetrics, QueueItem } from '../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -17,8 +18,8 @@ import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 const ReviewerDashboard: NextPage = () => {
   const { user } = useAuth();
   const router = useRouter();
-  const [queueStats, setQueueStats] = useState<any>(null);
-  const [myMetrics, setMyMetrics] = useState<any>(null);
+  useState<QueueMetrics | null>(null);
+  const [myMetrics, setMyMetrics] = useState<QueueMetrics | null>(null);
   const [myQueue, setMyQueue] = useState<any[]>([]);
   const [urgentCases, setUrgentCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,7 +130,7 @@ const ReviewerDashboard: NextPage = () => {
   );
 };
 
-const CaseRow: React.FC<{ cas: any; onClick: () => void }> = ({ cas, onClick }) => {
+const CaseRow: React.FC<{ cas: QueueItem; onClick: () => void }> = ({ cas, onClick }) => {
   const dl = deadlineLabel(cas.deadline);
   return (
     <div onClick={onClick} className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors last:border-0">

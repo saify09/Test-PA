@@ -1,3 +1,4 @@
+import type { MemberPARequest, StatusResult } from '../lib/types';
 import React, { useState, useEffect } from 'react';
 import type { NextPage } from 'next';
 import Head from 'next/head';
@@ -20,7 +21,7 @@ const MemberDashboard: NextPage = () => {
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusSearch, setStatusSearch] = useState('');
-  const [searchResult, setSearchResult] = useState<any>(null);
+  const [searchResult, setSearchResult] = useState<StatusResult | null>(null);
   const [searching, setSearching] = useState(false);
 
   useEffect(() => { loadRequests(); }, []);
@@ -265,7 +266,7 @@ const MemberDashboard: NextPage = () => {
 };
 
 // Request row component
-const RequestRow: React.FC<{ req: any; onClick: () => void }> = ({ req, onClick }) => {
+const RequestRow: React.FC<{ req: MemberPARequest; onClick: () => void }> = ({ req, onClick }) => {
   const needsAction = req.status === 'PENDING_INFO';
   const daysLeft = daysUntilExpiry(req.auth_valid_through);
 

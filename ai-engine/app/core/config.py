@@ -50,11 +50,40 @@ class Settings(BaseSettings):
     MCG_VERSION: str = "2024.1"
     INTERQUAL_VERSION: str = "2024"
 
-    # ── Security ─────────────────────────────────────────────────────────────
+    # INT-301: MCG Care Guidelines API (https://guidelines.mcg.com/api/)
+    MCG_API_KEY:  str = Field(default="")   # set in production
+    MCG_API_BASE: str = "https://guidelines.mcg.com/api/v3"
+    # INT-302: InterQual criteria engine (https://api.interqual.com/)
+    INTERQUAL_API_KEY:  str = Field(default="")   # set in production
+    INTERQUAL_API_BASE: str = "https://api.interqual.com/v2"
+    # INT-303: CMS NCD/LCD database (public, no key required)
+    CMS_API_BASE: str = "https://api.cms.gov/coverage/v1"
+    # Guidelines cache TTL (Redis)
+    GUIDELINES_CACHE_TTL: int = 300   # 5 minutes
+
+    # ── Security (SC-006 / HIPAA SC-004) ────────────────────────────────────
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 15           # HIPAA: 15-min sessions
+    JWT_EXPIRE_MINUTES: int = 15           # HIPAA: 15-min sessions (NFR-104)
     JWT_REFRESH_DAYS: int = 1
     ENCRYPTION_KEY: str = Field(default="dev-enc-key-32bytes-change-prod!")  # AES-256
+
+    # SC-006: Key rotation — 90-day cycle (HIPAA §164.312(a)(2)(iv))
+    # In production:
+    #   PRIMARY_SECRET_KEY   = current signing key (from AWS Secrets Manager / KMS)
+    #   SECONDARY_SECRET_KEY = previous key (kept for token verification during rotation window)
+    #   KEY_VERSION          = monotonically increasing integer stamped into every JWT ("kv" claim)
+    #   KEY_ROTATION_DAYS    = rotation frequency (90 days per SC-006)
+    #
+    # Rotation procedure (zero-downtime):
+    #   1. Generate new PRIMARY_SECRET_KEY, promote old primary → SECONDARY_SECRET_KEY
+    #   2. Increment KEY_VERSION
+    #   3. Rolling-deploy all services with new env vars
+    #   4. Tokens signed with old key verify via SECONDARY_SECRET_KEY until they expire (≤15 min)
+    #   5. After grace period (≥ JWT_EXPIRE_MINUTES), SECONDARY_SECRET_KEY can be retired
+    PRIMARY_SECRET_KEY:   str = Field(default="")   # overrides SECRET_KEY if set
+    SECONDARY_SECRET_KEY: str = Field(default="")   # previous key — valid during rotation window
+    KEY_VERSION:          int = 1                    # incremented on each rotation
+    KEY_ROTATION_DAYS:    int = 90                   # SC-006: rotate every 90 days
 
     # ── External payer APIs ──────────────────────────────────────────────────
     UHC_API_BASE: str = "https://api.uhc.com/prior-auth/v2"
@@ -71,6 +100,21 @@ class Settings(BaseSettings):
     ENABLE_AUTO_DENY:    bool = False      # Off by default — requires compliance review
     ENABLE_FHIR_PUSH:    bool = True
     ENABLE_KAFKA:        bool = True
+    ENABLE_RAG_ENGINE:   bool = True       # RAG-based guideline retrieval
+    # AI Model settings
+    BIOBERT_MODEL_ID:      str = "dmis-lab/biobert-v1.1"
+    CLINICALBERT_MODEL_ID: str = "emilyalsentzer/Bio_ClinicalBERT"
+    PUBMEDBERT_MODEL_ID:   str = "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
+    MODELS_CACHE_DIR:      str = "/models"
+    USE_GPU:               bool = False
+    # Service URLs (inter-service communication)
+    AUTH_SERVICE_URL:          str = "http://auth-service:8007"
+    USER_MGMT_SERVICE_URL:     str = "http://user-management-service:8008"
+    REPORTING_SERVICE_URL:     str = "http://reporting-service:8009"
+    ELIGIBILITY_SERVICE_URL:   str = "http://eligibility-service:8010"
+    AUDIT_SERVICE_URL:         str = "http://audit-service:8011"
+    NOTIFICATION_SERVICE_URL:  str = "http://notification-service:8005"
+    DOCUMENT_SERVICE_URL:      str = "http://document-service:8006"
 
     class Config:
         env_file = ".env"
@@ -78,3 +122,5 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# (appended by build process)

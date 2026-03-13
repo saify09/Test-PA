@@ -38,7 +38,7 @@ const Dashboard: NextPage = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('ALL');
   const [search, setSearch] = useState('');
-  const [useState<TrendPoint[]>([]);
+  const [trendData, setTrendData] = useState<TrendPoint[]>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {

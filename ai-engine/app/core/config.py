@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     # ── AWS / S3 ─────────────────────────────────────────────────────────────
     AWS_REGION: str = "us-east-1"
     S3_DOCUMENTS_BUCKET: str = "pa-documents-hipaa"
-    AWS_ACCESS_KEY_ID: str = ""
-    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_ACCESS_KEY_ID: str = "AKIA-DUMMY-ACCESS-KEY"
+    AWS_SECRET_ACCESS_KEY: str = "dummy-secret-access-key-1234567890"
 
     # ── AI / ML ──────────────────────────────────────────────────────────────
     # Confidence thresholds
@@ -51,10 +51,10 @@ class Settings(BaseSettings):
     INTERQUAL_VERSION: str = "2024"
 
     # INT-301: MCG Care Guidelines API (https://guidelines.mcg.com/api/)
-    MCG_API_KEY:  str = Field(default="")   # set in production
+    MCG_API_KEY:  str = Field(default="mcg-dummy-key-for-testing")   # set in production
     MCG_API_BASE: str = "https://guidelines.mcg.com/api/v3"
     # INT-302: InterQual criteria engine (https://api.interqual.com/)
-    INTERQUAL_API_KEY:  str = Field(default="")   # set in production
+    INTERQUAL_API_KEY:  str = Field(default="iq-dummy-key-for-testing")   # set in production
     INTERQUAL_API_BASE: str = "https://api.interqual.com/v2"
     # INT-303: CMS NCD/LCD database (public, no key required)
     CMS_API_BASE: str = "https://api.cms.gov/coverage/v1"

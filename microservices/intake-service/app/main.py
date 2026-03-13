@@ -113,6 +113,7 @@ class IntakeRequest(BaseModel):
     estimated_cost: Optional[float] = None    # Estimated cost for utilization mgmt
     chief_complaint: Optional[str] = None     # Patient's chief complaint
     hpi: Optional[str] = None                 # History of Present Illness
+    exam_findings: Optional[str] = None       # Physical exam findings (FLS §2.5)
 
     # Attachments
     document_ids: List[str] = []

@@ -65,7 +65,7 @@ export interface ClinicalSummary {
   service_category:      string;
   clinical_summary:      string;
   chief_complaint?:      string;
-  history_of_illness?:   string;
+  hpi?:                  string;
   exam_findings?:        string;
   relevant_labs?:        LabValue[];
   medications?:          string[];

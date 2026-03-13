@@ -31,6 +31,7 @@ interface ClinicalInfo {
   estimated_cost: string; quantity: number; frequency: string;
   duration: string; clinical_summary: string; lab_results: string;
   prior_treatments: string;
+  hpi: string; chief_complaint: string; exam_findings: string;
 }
 
 interface ProviderInfo {

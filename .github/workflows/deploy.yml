@@ -60,8 +60,8 @@ jobs:
           python-jose[cryptography] passlib[bcrypt] python-multipart httpx \
           sqlalchemy asyncpg alembic redis aiokafka boto3 cryptography \
           structlog prometheus-fastapi-instrumentator python-dateutil \
-          tenacity aiofiles jinja2 python-decouple fhir.resources hl7 \
-          pytest pytest-asyncio pytest-timeout httpx
+           tenacity aiofiles jinja2 python-decouple fhir.resources hl7 \
+          pytest pytest-asyncio pytest-timeout pytest-cov httpx
 
     - name: Run AI engine tests
       working-directory: ai-engine
@@ -135,6 +135,7 @@ jobs:
       env:
         NEXT_PUBLIC_API_URL: http://localhost:8001
         NEXT_TELEMETRY_DISABLED: "1"
+        NODE_OPTIONS: "--max-old-space-size=4096"
         NODE_ENV: production
       run: npm run build
 

@@ -120,7 +120,7 @@ jobs:
 
     - name: Install dependencies
       working-directory: ${{ matrix.app }}
-      run: npm install --legacy-peer-deps
+      run: npm install --legacy-peer-deps --prefer-offline --no-audit --progress=false
 
     - name: Type check
       working-directory: ${{ matrix.app }}

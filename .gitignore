@@ -128,7 +128,7 @@ lcov.info
 *.bin
 *.pt
 *.pth
-models/
+/models/
 checkpoints/
 mlruns/
 mlflow/
